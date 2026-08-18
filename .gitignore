@@ -216,3 +216,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# ytscript
+scripts/
+*.ytscript-state.json
+.ytscript-state.json
+ytscript.toml
