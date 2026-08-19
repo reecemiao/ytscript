@@ -26,7 +26,7 @@ class Config:
     """Channel handle (``@handle``), channel id (``UC...``) or any channel URL."""
 
     # --- language ------------------------------------------------------
-    language: str | None = "en"
+    language: str | None = "zh"
     """Main spoken language as an ISO 639-1 code. ``None``/``"auto"`` detects it."""
 
     # --- how much to do ------------------------------------------------
@@ -38,9 +38,14 @@ class Config:
 
     # --- speech-to-text -------------------------------------------------
     backend: str = "faster-whisper"
-    whisper_model: str = "small"
-    whisper_device: str = "auto"
-    whisper_compute_type: str = "default"
+    whisper_model: str = "large-v3"
+    whisper_device: str = "cuda"
+    whisper_compute_type: str = "float16"
+    """Defaults target an 8 GB NVIDIA card; see the README for the CPU-only settings."""
+
+    whisper_initial_prompt: str | None = None
+    """Seed text that steers spelling and register — for Chinese, simplified vs traditional."""
+
     openai_model: str = "whisper-1"
     openai_api_key_env: str = "OPENAI_API_KEY"
 
@@ -182,8 +187,10 @@ SAMPLE_CONFIG = """\
 # Channel handle, channel id or any channel URL.
 channel = "@channelhandle"
 
-# Main spoken language (ISO 639-1). Use "auto" to let the model detect it.
-language = "en"
+# Main spoken language (ISO 639-1). Setting it beats "auto": it skips the
+# detection pass and keeps the model from drifting into Japanese on unclear
+# Mandarin audio.
+language = "zh"
 
 # The first run transcribes this many of the newest videos; later runs only
 # look at the newest `check_limit` and pick up whatever is not in the state file.
@@ -192,9 +199,18 @@ check_limit = 5
 
 # "faster-whisper" runs locally, "openai" calls the hosted transcription API.
 backend = "faster-whisper"
-whisper_model = "small"
-whisper_device = "auto"
-whisper_compute_type = "default"
+
+# large-v3 at float16 needs about 5 GB of VRAM and is the best Chinese accuracy
+# an 8 GB card can hold. Out of memory -> "int8_float16" before a smaller model.
+# No NVIDIA GPU -> whisper_device = "cpu", whisper_compute_type = "int8".
+whisper_model = "large-v3"
+whisper_device = "cuda"
+whisper_compute_type = "float16"
+
+# Whisper transcribes Mandarin into traditional characters about as readily as
+# simplified. A simplified-character seed sentence settles it. Change or clear
+# this if you change `language`.
+whisper_initial_prompt = "以下是普通话的句子。"
 
 output_dir = "scripts"
 output_formats = ["txt"]

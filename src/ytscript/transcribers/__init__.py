@@ -23,6 +23,7 @@ def build_transcriber(config: Config) -> Transcriber:
             model=config.whisper_model,
             device=config.whisper_device,
             compute_type=config.whisper_compute_type,
+            initial_prompt=config.whisper_initial_prompt,
         )
     if config.backend == "openai":
         return OpenAITranscriber(

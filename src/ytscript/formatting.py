@@ -6,7 +6,7 @@ import json
 import re
 from pathlib import Path
 
-from .models import Segment, Transcript
+from .models import Segment, Transcript, join_text
 
 _UNSAFE = re.compile(r"[^\w\-. ]+", re.UNICODE)
 
@@ -48,7 +48,7 @@ def group_paragraphs(segments: list[Segment], gap: float = 2.0) -> list[tuple[fl
             continue
         pause = previous_end is not None and (segment.start - previous_end) >= gap
         if current and pause and current[-1].endswith((".", "!", "?", "…", "。", "？", "！")):
-            paragraphs.append((start, " ".join(current)))
+            paragraphs.append((start, join_text(current)))
             current = []
         if not current:
             start = segment.start
@@ -56,7 +56,7 @@ def group_paragraphs(segments: list[Segment], gap: float = 2.0) -> list[tuple[fl
         previous_end = segment.end
 
     if current:
-        paragraphs.append((start, " ".join(current)))
+        paragraphs.append((start, join_text(current)))
     return paragraphs
 
 
