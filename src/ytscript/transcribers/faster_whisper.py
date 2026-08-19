@@ -21,12 +21,14 @@ class FasterWhisperTranscriber:
         compute_type: str = "default",
         vad_filter: bool = True,
         beam_size: int = 5,
+        initial_prompt: str | None = None,
     ) -> None:
         self.model_name = model
         self.device = device
         self.compute_type = compute_type
         self.vad_filter = vad_filter
         self.beam_size = beam_size
+        self.initial_prompt = initial_prompt
         self._model: Any = None
 
     def _load_model(self) -> Any:
@@ -59,6 +61,7 @@ class FasterWhisperTranscriber:
                 language=language,
                 beam_size=self.beam_size,
                 vad_filter=self.vad_filter,
+                initial_prompt=self.initial_prompt,
             )
             segments = [
                 Segment(start=float(s.start), end=float(s.end), text=s.text.strip())

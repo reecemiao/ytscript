@@ -70,3 +70,31 @@ def test_find_config_file_walks_up(tmp_path: Path) -> None:
     nested = tmp_path / "a" / "b"
     nested.mkdir(parents=True)
     assert find_config_file(nested) == tmp_path / "ytscript.toml"
+
+
+def test_defaults_target_local_whisper_on_an_nvidia_gpu() -> None:
+    config = Config(channel="@x")
+    assert config.language == "zh"
+    assert config.backend == "faster-whisper"
+    assert (config.whisper_model, config.whisper_device) == ("large-v3", "cuda")
+    assert config.whisper_compute_type == "float16"
+
+
+def test_initial_prompt_round_trips_from_file_and_env(tmp_path: Path) -> None:
+    path = write_config(
+        tmp_path,
+        'channel = "@x"\nwhisper_initial_prompt = "以下是普通话的句子。"\n',
+    )
+    assert load_config(path=path, env={}).whisper_initial_prompt == "以下是普通话的句子。"
+
+    config = load_config(path=path, env={"YTSCRIPT_WHISPER_INITIAL_PROMPT": "简体中文。"})
+    assert config.whisper_initial_prompt == "简体中文。"
+
+
+def test_sample_config_is_loadable_and_matches_the_defaults(tmp_path: Path) -> None:
+    from ytscript.config import SAMPLE_CONFIG
+
+    config = load_config(path=write_config(tmp_path, SAMPLE_CONFIG), env={})
+    assert config.language == "zh"
+    assert config.whisper_model == "large-v3"
+    assert config.whisper_initial_prompt is not None

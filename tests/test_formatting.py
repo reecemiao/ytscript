@@ -83,3 +83,36 @@ def test_write_outputs(tmp_path: Path) -> None:
         "2024-05-01_How-to-cook-rice_abc123.json",
     ]
     assert all(p.is_file() for p in paths)
+
+
+CHINESE = [
+    Segment(0.0, 2.0, "今天我们来聊聊这个话题。"),
+    Segment(2.1, 4.0, "先从背景开始。"),
+    Segment(9.0, 11.0, "第一步。"),
+]
+
+
+def test_chinese_segments_join_without_spaces() -> None:
+    paragraphs = group_paragraphs(CHINESE, gap=2.0)
+    assert paragraphs == [
+        (0.0, "今天我们来聊聊这个话题。先从背景开始。"),
+        (9.0, "第一步。"),
+    ]
+
+
+def test_latin_words_still_get_their_spaces() -> None:
+    assert group_paragraphs(SEGMENTS, gap=2.0)[0][1] == "Welcome back. Today we cook rice."
+
+
+def test_mixed_chinese_and_latin_keeps_the_seam_readable() -> None:
+    segments = [
+        Segment(0.0, 2.0, "我们用"),
+        Segment(2.0, 4.0, "Python"),
+        Segment(4.0, 6.0, "写一个脚本。"),
+    ]
+    assert group_paragraphs(segments)[0][1] == "我们用 Python 写一个脚本。"
+
+
+def test_transcript_text_joins_chinese_without_spaces() -> None:
+    transcript = Transcript(video=VIDEO, segments=CHINESE, language="zh", backend="fake")
+    assert transcript.text == "今天我们来聊聊这个话题。先从背景开始。第一步。"
