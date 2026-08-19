@@ -46,6 +46,9 @@ class Config:
     whisper_initial_prompt: str | None = None
     """Seed text that steers spelling and register — for Chinese, simplified vs traditional."""
 
+    whisper_batch_size: int = 4
+    """Clips decoded at once. ``1`` turns batching off; 4 suits large-v3 on an 8 GB card."""
+
     openai_model: str = "whisper-1"
     openai_api_key_env: str = "OPENAI_API_KEY"
 
@@ -105,6 +108,8 @@ class Config:
             raise ConfigError("initial_backfill must be at least 1")
         if self.check_limit < 1:
             raise ConfigError("check_limit must be at least 1")
+        if self.whisper_batch_size < 1:
+            raise ConfigError("whisper_batch_size must be at least 1 (1 turns batching off)")
 
 
 _FIELD_TYPES = {f.name: f.type for f in fields(Config)}
@@ -211,6 +216,11 @@ whisper_compute_type = "float16"
 # simplified. A simplified-character seed sentence settles it. Change or clear
 # this if you change `language`.
 whisper_initial_prompt = "以下是普通话的句子。"
+
+# Clips decoded at once — several times faster than one at a time, at the cost
+# of VRAM. 4 leaves headroom on an 8 GB card; a 12 GB or larger card can take
+# 8 or 16. Drop to 1 to turn batching off.
+whisper_batch_size = 4
 
 output_dir = "scripts"
 output_formats = ["txt"]
