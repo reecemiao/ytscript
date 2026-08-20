@@ -222,3 +222,5 @@ scripts/
 *.ytscript-state.json
 .ytscript-state.json
 ytscript.toml
+# A signed-in YouTube session, for members-only and age-restricted videos.
+cookies.txt

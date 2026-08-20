@@ -69,6 +69,13 @@ class Config:
     keep_audio: bool = False
     audio_format: str = "bestaudio[ext=m4a]/bestaudio/best"
     cookies_file: Path | None = None
+    """Netscape-format cookies.txt exported from a signed-in browser session."""
+
+    cookies_from_browser: str | None = None
+    """Read cookies straight out of a browser: ``BROWSER[+KEYRING][:PROFILE][::CONTAINER]``."""
+
+    include_members_only: bool = False
+    """Also transcribe members-only videos. Needs cookies from an account that is a member."""
 
     extra: dict[str, Any] = field(default_factory=dict, repr=False)
 
@@ -114,6 +121,11 @@ class Config:
             raise ConfigError("check_limit must be at least 1")
         if self.whisper_batch_size < 1:
             raise ConfigError("whisper_batch_size must be at least 1 (1 turns batching off)")
+        if self.include_members_only and not (self.cookies_file or self.cookies_from_browser):
+            raise ConfigError(
+                "include_members_only needs a signed-in session: set cookies_file or "
+                "cookies_from_browser to an account that holds the channel's membership"
+            )
 
 
 _FIELD_TYPES = {f.name: f.type for f in fields(Config)}
@@ -232,4 +244,10 @@ timestamps = false
 
 state_file = ".ytscript-state.json"
 keep_audio = false
+
+# Members-only videos are skipped unless you sign in. Point one of the two cookie
+# settings at an account that holds the membership, then turn the flag on.
+# cookies_file = "cookies.txt"
+# cookies_from_browser = "firefox"          # BROWSER[+KEYRING][:PROFILE][::CONTAINER]
+include_members_only = false
 """

@@ -9,23 +9,46 @@ and picks up whatever it has not seen before.
 
 ## Install
 
+ytscript is not published to PyPI, so it installs from this repository. It needs [uv],
+which pins the whole dependency graph through `uv.lock` — same versions here as in CI.
+From a checkout, which is what the rest of this README assumes:
+
 ```bash
-pip install "ytscript[local]"      # local transcription with faster-whisper
-pip install "ytscript[openai]"     # hosted transcription instead
+git clone https://github.com/reecemiao/ytscript
+cd ytscript
+uv sync --extra local              # local transcription with faster-whisper
+uv sync --extra openai             # hosted transcription instead
 ```
 
-From a checkout, with [uv]: `uv sync --extra local` — see [Development](#development).
+Commands then run as `uv run ytscript …`, or through `.venv/bin/ytscript` directly. To
+put `ytscript` on `PATH` without a checkout, install it from git as a uv tool:
+
+```bash
+uv tool install "ytscript[local] @ git+https://github.com/reecemiao/ytscript"
+```
 
 The `local` extra pulls in [faster-whisper]; the model itself (about 3 GB for the
 default `large-v3`) downloads on first use and is cached afterwards. Nothing leaves the
 machine. The `openai` extra needs `OPENAI_API_KEY` in the environment and charges per
-minute of audio, but needs no local model.
+minute of audio, but needs no local model. They are declared as conflicting extras — two
+transcription stacks, nothing needs both — so sync one at a time.
 
 **On an NVIDIA GPU, install the CUDA libraries too.** faster-whisper runs on
-[CTranslate2], which needs cuBLAS and cuDNN 9 and does not bundle them:
+[CTranslate2], which needs cuBLAS and cuDNN 9 and does not bundle them. In a checkout:
 
 ```bash
-pip install nvidia-cublas-cu12 "nvidia-cudnn-cu12>=9,<10"
+uv add nvidia-cublas-cu12 "nvidia-cudnn-cu12>=9,<10"
+```
+
+That writes them into `pyproject.toml` and `uv.lock`, which is what you want for a
+machine that always runs on the GPU — leave those edits uncommitted in a contributor
+checkout. For a one-off run instead, `uv run --with nvidia-cublas-cu12 --with
+"nvidia-cudnn-cu12>=9,<10" ytscript run`. A tool install takes the same libraries
+through `--with`:
+
+```bash
+uv tool install "ytscript[local] @ git+https://github.com/reecemiao/ytscript" \
+  --with nvidia-cublas-cu12 --with "nvidia-cudnn-cu12>=9,<10"
 ```
 
 Without them the model load fails on a missing `cudnn_ops64_9.dll` (Windows) or
@@ -34,7 +57,7 @@ the virtualenv have to be on `PATH` for the process. Check the setup before star
 backfill:
 
 ```bash
-python -c "from faster_whisper import WhisperModel; WhisperModel('large-v3', device='cuda', compute_type='float16'); print('ok')"
+uv run python -c "from faster_whisper import WhisperModel; WhisperModel('large-v3', device='cuda', compute_type='float16'); print('ok')"
 ```
 
 The default `whisper_device = "cuda"` makes a broken CUDA install fail loudly here
@@ -70,6 +93,12 @@ Useful flags on `run`:
 | `--timestamps` | Prefix each paragraph with `[hh:mm:ss]` |
 | `--dry-run` | List what is missing without downloading anything |
 | `--keep-audio` | Keep the downloaded audio next to the scripts |
+| `--members-only` | Also transcribe members-only videos (needs cookies) |
+| `--no-members-only` | Pass over members-only videos (the default) |
+| `--cookies FILE` | Netscape `cookies.txt` from a signed-in session |
+| `--cookies-from-browser firefox` | Read those cookies straight out of a browser |
+
+The cookie and members-only flags work on `list` too.
 
 ## Configuration
 
@@ -99,11 +128,68 @@ paragraph_gap = 2.0          # silence in seconds that starts a new paragraph
 state_file = ".ytscript-state.json"
 keep_audio = false
 audio_format = "bestaudio[ext=m4a]/bestaudio/best"
-# cookies_file = "cookies.txt"   # for age-restricted or member-only videos
+
+# Signing in — needed for members-only and age-restricted videos.
+# cookies_file = "cookies.txt"        # Netscape cookies.txt export
+# cookies_from_browser = "firefox"    # BROWSER[+KEYRING][:PROFILE][::CONTAINER]
+include_members_only = false          # true also transcribes members-only videos
 ```
 
 Every key has a matching environment variable: `YTSCRIPT_CHANNEL`,
 `YTSCRIPT_LANGUAGE`, `YTSCRIPT_BACKEND`, and so on.
+
+### Members-only videos
+
+A channel's members-only videos show up in its uploads listing, but YouTube refuses the
+audio to anyone who is not signed in as a member:
+
+```
+ERROR: [youtube] 58iGVbvDu9Q: Join this channel to get access to members-only content
+like this video, and other exclusive perks.
+```
+
+So `ytscript` passes over them by default and says how many it left:
+
+```
+checked 5 video(s); 3 already had a script
+skipped 1 members-only video(s); pass --members-only with cookies from a member account
+to include them
+```
+
+They are recognised from the "Members only" badge in the listing, so nothing is
+downloaded and nothing is written to the state file — the day the membership starts,
+they are picked up like any other unseen video.
+
+To transcribe them, point ytscript at cookies from an account that holds the membership
+and turn the setting on:
+
+```toml
+cookies_from_browser = "firefox"   # or cookies_file = "cookies.txt"
+include_members_only = true
+```
+
+or, for one run:
+
+```bash
+ytscript run --cookies-from-browser firefox --members-only
+```
+
+`cookies_from_browser` takes yt-dlp's `BROWSER[+KEYRING][:PROFILE][::CONTAINER]` syntax
+(`chrome`, `firefox:dev-edition`, `chromium+gnomekeyring`). It reads the browser's cookie
+store directly, which is the easier of the two: Chromium locks its database while it is
+running, so close the browser first, or use `cookies_file` with a `cookies.txt` export
+instead. Either way the cookies are a live login; `cookies.txt` is in `.gitignore`, and
+anything you export under another name belongs there too.
+
+Turning `include_members_only` on without either cookie setting is refused up front,
+since every one of those downloads would fail. A signed-in run also gets you
+age-restricted videos, which fail the same way for the opposite reason.
+
+`ytscript list` always shows members-only videos, marked, whatever the setting says:
+
+```
+58iGVbvDu9Q  2024-05-01  Members-only Q&A  [members only]
+```
 
 ### Chinese
 
@@ -182,8 +268,8 @@ getting the batch size right.
 ytscript run --batch-size 8      # try a larger batch for one run
 ```
 
-Batching needs faster-whisper 1.1 or newer, which is what `ytscript[local]` installs. An
-older version logs a warning and transcribes sequentially.
+Batching needs faster-whisper 1.1 or newer, which is the floor the `local` extra sets and
+what `uv.lock` pins. An older version logs a warning and transcribes sequentially.
 
 ## Running it on a schedule
 
@@ -209,8 +295,8 @@ speech-to-text engine only has to match the small protocol in
 ## Development
 
 The project is managed with [uv] and linted and formatted with [ruff]. Both tool
-versions are pinned in `uv.lock`, so everyone — hooks, CI, a plain `uv run` — gets the
-same ones.
+versions are pinned in `uv.lock` too, so everyone — hooks, CI, a plain `uv run` — gets
+the same ones.
 
 ```bash
 uv sync                                  # dev environment, no transcription backend
@@ -225,15 +311,21 @@ uv run ruff format                       # format
 uv run ytscript --help                   # the CLI from the checkout
 ```
 
-The test suite fakes YouTube and the transcriber, so it needs no network, no model, no
-API key and neither extra installed.
+Dependencies change through uv, so `uv.lock` moves with `pyproject.toml`:
 
-`local` and `openai` are declared as conflicting extras: they are two separate
-transcription stacks and nothing needs both, so install one at a time.
+```bash
+uv add yt-dlp                            # or edit pyproject.toml, then: uv lock
+```
+
+`uv lock --check` gates both the push hook and the CI lint job, so a `pyproject.toml`
+edit that leaves the lockfile behind fails before it reaches review.
+
+The test suite fakes YouTube and the transcriber, so it needs no network, no model, no
+API key and neither extra installed — a bare `uv sync` is enough to run it.
 
 ### Hooks
 
-`pre-commit install --install-hooks` wires up two stages:
+`uv run pre-commit install --install-hooks` wires up two stages:
 
 | Stage | Runs |
 | --- | --- |
@@ -241,11 +333,13 @@ transcription stacks and nothing needs both, so install one at a time.
 | `pre-push` | `ruff check`, `ruff format --check`, `uv lock --check`, `pytest` |
 
 The commit hooks fix files; the push hooks only report, so a push fails on the same
-things CI would fail on. `git push --no-verify` skips them.
+things CI would fail on. Both run ruff and pytest through `uv run --frozen`, which keeps
+`uv.lock` the only place a tool version is set. `git push --no-verify` skips them.
 
 ### CI
 
-`.github/workflows/ci.yml` runs on every push to `main` and every pull request:
+`.github/workflows/ci.yml` runs on every push to `main`, every pull request, and on
+demand from the Actions tab:
 
 - **lint** — `uv lock --check`, `ruff check`, `ruff format --check`
 - **test** — pytest on Python 3.11, 3.12 and 3.13 on Linux, plus 3.13 on macOS and

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 from fakes import FakeTranscriber, FakeYouTubeClient, make_videos
@@ -156,3 +157,35 @@ def test_keep_audio_leaves_the_file_behind(tmp_path: Path) -> None:
     pipeline, _, _ = build(tmp_path, make_videos(1), initial_backfill=1, keep_audio=True)
     pipeline.run()
     assert (tmp_path / "scripts" / "audio" / "vid000.m4a").is_file()
+
+
+def _with_members_only(videos, index: int):
+    marked = list(videos)
+    marked[index] = replace(marked[index], members_only=True)
+    return marked
+
+
+def test_members_only_videos_are_skipped_by_default(tmp_path: Path) -> None:
+    videos = _with_members_only(make_videos(3), 1)
+    pipeline, client, _ = build(tmp_path, videos)
+    report = pipeline.run()
+
+    assert report.checked == 3
+    assert report.members_only == ["vid001"]
+    assert client.downloaded == ["vid002", "vid000"]
+    # Nothing is recorded for it, so it comes back the day the membership starts.
+    assert "vid001" not in State.load(tmp_path / "state.json").videos
+
+
+def test_members_only_videos_are_taken_when_signed_in(tmp_path: Path) -> None:
+    videos = _with_members_only(make_videos(3), 1)
+    pipeline, client, _ = build(
+        tmp_path,
+        videos,
+        include_members_only=True,
+        cookies_file=tmp_path / "cookies.txt",
+    )
+    report = pipeline.run()
+
+    assert report.members_only == []
+    assert sorted(client.downloaded) == ["vid000", "vid001", "vid002"]

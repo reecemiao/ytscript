@@ -104,3 +104,24 @@ def test_sample_config_is_loadable_and_matches_the_defaults(tmp_path: Path) -> N
     assert config.language == "zh"
     assert config.whisper_model == "large-v3"
     assert config.whisper_initial_prompt is not None
+
+
+def test_members_only_needs_a_signed_in_session() -> None:
+    with pytest.raises(ConfigError, match="include_members_only"):
+        Config(channel="@x", include_members_only=True).validate()
+
+    Config(channel="@x", include_members_only=True, cookies_file="cookies.txt").validate()
+    Config(channel="@x", include_members_only=True, cookies_from_browser="firefox").validate()
+
+
+def test_members_only_reads_from_file_and_env(tmp_path: Path) -> None:
+    path = write_config(
+        tmp_path,
+        'channel = "@x"\ncookies_from_browser = "firefox"\ninclude_members_only = true\n',
+    )
+    config = load_config(path=path, env={})
+    assert config.include_members_only is True
+    assert config.cookies_from_browser == "firefox"
+
+    off = load_config(path=path, env={"YTSCRIPT_INCLUDE_MEMBERS_ONLY": "false"})
+    assert off.include_members_only is False

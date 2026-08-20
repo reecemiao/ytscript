@@ -30,6 +30,34 @@ def build_parser() -> argparse.ArgumentParser:
             "--language",
             help="main spoken language as an ISO 639-1 code, or 'auto' to detect it",
         )
+        target.add_argument(
+            "--cookies",
+            dest="cookies_file",
+            type=Path,
+            metavar="FILE",
+            help="Netscape cookies.txt from a signed-in browser session",
+        )
+        target.add_argument(
+            "--cookies-from-browser",
+            dest="cookies_from_browser",
+            metavar="BROWSER[+KEYRING][:PROFILE][::CONTAINER]",
+            help="read cookies straight out of a browser, e.g. firefox or chrome",
+        )
+        members = target.add_mutually_exclusive_group()
+        members.add_argument(
+            "--members-only",
+            dest="include_members_only",
+            action="store_true",
+            default=None,
+            help="also take members-only videos; needs cookies from an account that is a member",
+        )
+        members.add_argument(
+            "--no-members-only",
+            dest="include_members_only",
+            action="store_false",
+            default=None,
+            help="pass over members-only videos (the default)",
+        )
 
     run = sub.add_parser("run", help="transcribe videos that have no script yet")
     add_common(run)
@@ -84,6 +112,9 @@ _OVERRIDE_FIELDS = (
     "timestamps",
     "keep_audio",
     "state_file",
+    "cookies_file",
+    "cookies_from_browser",
+    "include_members_only",
 )
 
 
@@ -100,6 +131,11 @@ def _config_from_args(args: argparse.Namespace) -> Config:
 
 def _print_report(report: RunReport, dry_run: bool) -> None:
     print(f"checked {report.checked} video(s); {len(report.skipped)} already had a script")
+    if report.members_only:
+        print(
+            f"skipped {len(report.members_only)} members-only video(s); "
+            "pass --members-only with cookies from a member account to include them"
+        )
     if not report.written and not report.failed:
         print("nothing new")
         return
@@ -137,7 +173,8 @@ def cmd_list(args: argparse.Namespace) -> int:
         return 0
     for video in videos:
         published = video.upload_date.isoformat() if video.upload_date else "----------"
-        print(f"{video.id}  {published}  {video.title}")
+        marker = "  [members only]" if video.members_only else ""
+        print(f"{video.id}  {published}  {video.title}{marker}")
     return 0
 
 
