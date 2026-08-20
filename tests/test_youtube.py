@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date
 
 import pytest
+
 from ytscript.youtube import YouTubeError, _iter_entries, _to_video, channel_uploads_url
 
 
@@ -11,7 +12,10 @@ from ytscript.youtube import YouTubeError, _iter_entries, _to_video, channel_upl
     [
         ("@handle", "https://www.youtube.com/@handle/videos"),
         ("handle", "https://www.youtube.com/@handle/videos"),
-        ("UCabcdefghijklmnopqrstuv", "https://www.youtube.com/channel/UCabcdefghijklmnopqrstuv/videos"),
+        (
+            "UCabcdefghijklmnopqrstuv",
+            "https://www.youtube.com/channel/UCabcdefghijklmnopqrstuv/videos",
+        ),
         ("https://www.youtube.com/@handle", "https://www.youtube.com/@handle/videos"),
         ("https://www.youtube.com/@handle/videos", "https://www.youtube.com/@handle/videos"),
         ("https://www.youtube.com/@handle/streams", "https://www.youtube.com/@handle/streams"),

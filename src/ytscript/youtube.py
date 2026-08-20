@@ -21,9 +21,7 @@ def _load_yt_dlp() -> Any:
     try:
         import yt_dlp  # noqa: PLC0415 - optional at import time, required at call time
     except ImportError as exc:  # pragma: no cover - depends on the install
-        raise YouTubeError(
-            "yt-dlp is not installed; install it with 'pip install yt-dlp'"
-        ) from exc
+        raise YouTubeError("yt-dlp is not installed; install it with 'pip install yt-dlp'") from exc
     return yt_dlp
 
 

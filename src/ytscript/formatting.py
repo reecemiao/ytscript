@@ -121,9 +121,7 @@ def render_json(transcript: Transcript, timestamps: bool = False, gap: float = 2
         "language": transcript.language,
         "backend": transcript.backend,
         "text": transcript.text,
-        "segments": [
-            {"start": s.start, "end": s.end, "text": s.text} for s in transcript.segments
-        ],
+        "segments": [{"start": s.start, "end": s.end, "text": s.text} for s in transcript.segments],
     }
     return json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
 

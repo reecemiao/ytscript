@@ -19,13 +19,60 @@ dependencies = [
 local = ["faster-whisper>=1.1.0"]
 # Hosted speech-to-text via the OpenAI audio transcription endpoint.
 openai = ["openai>=1.30.0"]
-dev = ["pytest>=8.0"]
 
 [project.scripts]
 ytscript = "ytscript.cli:main"
+
+# Not part of the published package: `uv sync` installs these by default.
+[dependency-groups]
+dev = [
+    "pre-commit>=3.7",
+    "pytest>=8.0",
+    "ruff>=0.15",
+]
+
+[tool.uv]
+# The `local` and `openai` extras pull in different transcription stacks and are
+# never needed at the same time, so resolving them together is wasted work.
+conflicts = [[{ extra = "local" }, { extra = "openai" }]]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ytscript"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E",       # pycodestyle
+    "W",
+    "F",       # pyflakes
+    "I",       # isort
+    "UP",      # pyupgrade
+    "B",       # bugbear
+    "SIM",     # flake8-simplify
+    "C4",      # comprehensions
+    "RUF",     # ruff-specific
+    "PTH",     # prefer pathlib
+    "PLC0415", # imports live at the top of the file unless a `noqa` says why not
+]
+ignore = [
+    # Scripts are Chinese: fullwidth punctuation is the point, not a typo.
+    "RUF001",
+    "RUF002",
+    "RUF003",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests import inside a function to keep a symbol scoped to the case that uses it.
+"tests/**" = ["PLC0415"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["ytscript"]
+
+[tool.ruff.format]
+docstring-code-format = true

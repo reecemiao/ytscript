@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -20,7 +20,7 @@ class State:
     videos: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     @classmethod
-    def load(cls, path: Path) -> "State":
+    def load(cls, path: Path) -> State:
         path = Path(path)
         if not path.is_file():
             return cls(path=path)
@@ -42,7 +42,7 @@ class State:
         return video_id in self.videos
 
     def record(self, video_id: str, **details: Any) -> None:
-        entry = {"transcribed_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+        entry = {"transcribed_at": datetime.now(UTC).isoformat(timespec="seconds")}
         entry.update({key: value for key, value in details.items() if value is not None})
         self.videos[video_id] = entry
 

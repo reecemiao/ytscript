@@ -95,7 +95,9 @@ class Config:
                 "export YTSCRIPT_CHANNEL, or pass --channel"
             )
         if self.backend not in BACKENDS:
-            raise ConfigError(f"unknown backend {self.backend!r}; expected one of {', '.join(BACKENDS)}")
+            raise ConfigError(
+                f"unknown backend {self.backend!r}; expected one of {', '.join(BACKENDS)}"
+            )
         unknown = [fmt for fmt in self.output_formats if fmt not in OUTPUT_FORMATS]
         if unknown:
             raise ConfigError(
@@ -103,7 +105,9 @@ class Config:
                 f"expected any of {', '.join(OUTPUT_FORMATS)}"
             )
         if not self.output_formats:
-            raise ConfigError("output_formats is empty; expected at least one of " + ", ".join(OUTPUT_FORMATS))
+            raise ConfigError(
+                "output_formats is empty; expected at least one of " + ", ".join(OUTPUT_FORMATS)
+            )
         if self.initial_backfill < 1:
             raise ConfigError("initial_backfill must be at least 1")
         if self.check_limit < 1:
