@@ -10,12 +10,12 @@ from ytscript.state import State
 
 
 def make_config(tmp_path: Path, **kwargs) -> Config:
-    defaults = dict(
-        channel="@testchannel",
-        language="en",
-        output_dir=tmp_path / "scripts",
-        state_file=tmp_path / "state.json",
-    )
+    defaults = {
+        "channel": "@testchannel",
+        "language": "en",
+        "output_dir": tmp_path / "scripts",
+        "state_file": tmp_path / "state.json",
+    }
     defaults.update(kwargs)
     return Config(**defaults)
 
@@ -82,8 +82,12 @@ def test_language_is_passed_to_the_backend(tmp_path: Path) -> None:
 
     other = tmp_path / "auto"
     pipeline, _, transcriber = build(
-        other, make_videos(1), language="auto", initial_backfill=1,
-        output_dir=other / "scripts", state_file=other / "state.json",
+        other,
+        make_videos(1),
+        language="auto",
+        initial_backfill=1,
+        output_dir=other / "scripts",
+        state_file=other / "state.json",
     )
     pipeline.run()
     assert transcriber.calls[0][1] is None
@@ -92,7 +96,9 @@ def test_language_is_passed_to_the_backend(tmp_path: Path) -> None:
 def test_failures_are_reported_and_not_recorded(tmp_path: Path) -> None:
     client = FakeYouTubeClient(make_videos(3))
     transcriber = FakeTranscriber(fail_on={"vid001"})
-    pipeline = Pipeline(make_config(tmp_path, initial_backfill=3), client=client, transcriber=transcriber)
+    pipeline = Pipeline(
+        make_config(tmp_path, initial_backfill=3), client=client, transcriber=transcriber
+    )
     report = pipeline.run()
 
     assert [vid for vid, _ in report.failed] == ["vid001"]
@@ -131,7 +137,11 @@ def test_explicit_limit_overrides_the_configured_one(tmp_path: Path) -> None:
 
 def test_multiple_output_formats_and_audio_cleanup(tmp_path: Path) -> None:
     pipeline, _, _ = build(
-        tmp_path, make_videos(1), initial_backfill=1, output_formats=("txt", "json"), timestamps=True
+        tmp_path,
+        make_videos(1),
+        initial_backfill=1,
+        output_formats=("txt", "json"),
+        timestamps=True,
     )
     pipeline.run()
 

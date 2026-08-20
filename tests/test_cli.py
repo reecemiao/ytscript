@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+
 from fakes import FakeTranscriber, FakeYouTubeClient, make_videos
 from ytscript import cli
 
@@ -61,8 +62,13 @@ def test_run_backfill_flag_forces_the_backfill_size(
     assert fake_pipeline.listed == [("@testchannel", 1), ("@testchannel", 3)]
 
 
-def test_run_dry_run_and_cli_overrides(project: Path, fake_pipeline, capsys: pytest.CaptureFixture) -> None:
-    assert cli.main(["run", "--dry-run", "--channel", "@other", "--language", "de", "--limit", "2"]) == 0
+def test_run_dry_run_and_cli_overrides(
+    project: Path, fake_pipeline, capsys: pytest.CaptureFixture
+) -> None:
+    assert (
+        cli.main(["run", "--dry-run", "--channel", "@other", "--language", "de", "--limit", "2"])
+        == 0
+    )
     assert fake_pipeline.listed == [("@other", 2)]
     assert "would transcribe 2" in capsys.readouterr().out
     assert not (project / "scripts").exists()

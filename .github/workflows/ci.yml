@@ -1,0 +1,131 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A new push to a branch makes the run in flight for it pointless.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # Nothing here needs to talk to a terminal.
+  UV_NO_PROGRESS: "1"
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install the locked toolchain
+        run: uv sync --frozen
+
+      # Fails if pyproject.toml moved without uv.lock being regenerated.
+      - name: uv.lock is up to date
+        run: uv lock --check
+
+      - name: ruff check
+        run: uv run --frozen ruff check --output-format=github
+
+      - name: ruff format
+        run: uv run --frozen ruff format --check --diff
+
+  test:
+    name: test (${{ matrix.os }}, py${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        python-version: ["3.11", "3.12", "3.13"]
+        include:
+          # The README documents a Windows setup, so keep one runner honest.
+          - os: windows-latest
+            python-version: "3.13"
+          - os: macos-latest
+            python-version: "3.13"
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          python-version: ${{ matrix.python-version }}
+
+      # The suite fakes both transcription backends, so no extra is needed.
+      - name: Install the locked environment
+        run: uv sync --frozen
+
+      - name: pytest
+        run: uv run --frozen pytest -q
+
+  extras:
+    name: extras (${{ matrix.extra }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Declared as conflicting in pyproject.toml, so resolve one at a time.
+        include:
+          - extra: local
+            import: ytscript.transcribers.faster_whisper
+          - extra: openai
+            import: ytscript.transcribers.openai_api
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install with the ${{ matrix.extra }} extra
+        run: uv sync --frozen --extra ${{ matrix.extra }}
+
+      # Catches an extra whose real dependency has drifted out from under the
+      # import, which the faked unit tests cannot see.
+      - name: Import the backend against its real dependency
+        run: uv run --frozen --extra ${{ matrix.extra }} python -c "import ${{ matrix.import }}"
+
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Build the sdist and the wheel
+        run: uv build
+
+      # A wheel that does not expose the console script is a broken release.
+      - name: The wheel installs and runs
+        run: |
+          uv run --isolated --no-project --with dist/*.whl ytscript --help
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          retention-days: 7

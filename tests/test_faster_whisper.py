@@ -7,6 +7,7 @@ import types
 from pathlib import Path
 
 import pytest
+
 from ytscript.config import Config
 from ytscript.transcribers import build_transcriber
 from ytscript.transcribers.base import TranscriptionError

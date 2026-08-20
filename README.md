@@ -14,7 +14,7 @@ pip install "ytscript[local]"      # local transcription with faster-whisper
 pip install "ytscript[openai]"     # hosted transcription instead
 ```
 
-Installed from a checkout: `pip install -e ".[local,dev]"`.
+From a checkout, with [uv]: `uv sync --extra local` — see [Development](#development).
 
 The `local` extra pulls in [faster-whisper]; the model itself (about 3 GB for the
 default `large-v3`) downloads on first use and is cached afterwards. Nothing leaves the
@@ -208,14 +208,55 @@ speech-to-text engine only has to match the small protocol in
 
 ## Development
 
+The project is managed with [uv] and linted and formatted with [ruff]. Both tool
+versions are pinned in `uv.lock`, so everyone — hooks, CI, a plain `uv run` — gets the
+same ones.
+
 ```bash
-pip install -e ".[dev]"
-pytest
+uv sync                                  # dev environment, no transcription backend
+uv sync --extra local                    # add faster-whisper to it
+uv run pre-commit install --install-hooks   # once per checkout
 ```
 
-The test suite fakes YouTube and the transcriber, so it needs no network, no model and
-no API key.
+```bash
+uv run pytest                            # tests
+uv run ruff check --fix                  # lint
+uv run ruff format                       # format
+uv run ytscript --help                   # the CLI from the checkout
+```
 
+The test suite fakes YouTube and the transcriber, so it needs no network, no model, no
+API key and neither extra installed.
+
+`local` and `openai` are declared as conflicting extras: they are two separate
+transcription stacks and nothing needs both, so install one at a time.
+
+### Hooks
+
+`pre-commit install --install-hooks` wires up two stages:
+
+| Stage | Runs |
+| --- | --- |
+| `pre-commit` | whitespace and YAML/TOML hygiene, `ruff check --fix`, `ruff format` |
+| `pre-push` | `ruff check`, `ruff format --check`, `uv lock --check`, `pytest` |
+
+The commit hooks fix files; the push hooks only report, so a push fails on the same
+things CI would fail on. `git push --no-verify` skips them.
+
+### CI
+
+`.github/workflows/ci.yml` runs on every push to `main` and every pull request:
+
+- **lint** — `uv lock --check`, `ruff check`, `ruff format --check`
+- **test** — pytest on Python 3.11, 3.12 and 3.13 on Linux, plus 3.13 on macOS and
+  Windows
+- **extras** — installs `local` and `openai` separately and imports each backend against
+  its real dependency, which the faked unit tests cannot cover
+- **build** — `uv build`, then installs the wheel in a clean environment and runs
+  `ytscript --help`
+
+[uv]: https://docs.astral.sh/uv/
+[ruff]: https://docs.astral.sh/ruff/
 [faster-whisper]: https://github.com/SYSTRAN/faster-whisper
 [CTranslate2]: https://github.com/OpenNMT/CTranslate2
 [OpenCC]: https://github.com/BYVoid/OpenCC

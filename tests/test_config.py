@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+
 from ytscript.config import Config, ConfigError, find_config_file, load_config
 
 
@@ -36,7 +37,11 @@ def test_loads_namespaced_toml(tmp_path: Path) -> None:
 
 def test_env_overrides_file_and_overrides_win(tmp_path: Path) -> None:
     path = write_config(tmp_path, 'channel = "@fromfile"\nlanguage = "en"\n')
-    env = {"YTSCRIPT_LANGUAGE": "es", "YTSCRIPT_INITIAL_BACKFILL": "7", "YTSCRIPT_KEEP_AUDIO": "yes"}
+    env = {
+        "YTSCRIPT_LANGUAGE": "es",
+        "YTSCRIPT_INITIAL_BACKFILL": "7",
+        "YTSCRIPT_KEEP_AUDIO": "yes",
+    }
     config = load_config(path=path, env=env)
     assert (config.language, config.initial_backfill, config.keep_audio) == ("es", 7, True)
 
