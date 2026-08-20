@@ -155,7 +155,8 @@ ytscript run --cookies-from-browser firefox --members-only
 (`chrome`, `firefox:dev-edition`, `chromium+gnomekeyring`). It reads the browser's cookie
 store directly, which is the easier of the two: Chromium locks its database while it is
 running, so close the browser first, or use `cookies_file` with a `cookies.txt` export
-instead. Either way the cookies are a live login — keep the file out of version control.
+instead. Either way the cookies are a live login; `cookies.txt` is in `.gitignore`, and
+anything you export under another name belongs there too.
 
 Turning `include_members_only` on without either cookie setting is refused up front,
 since every one of those downloads would fail. A signed-in run also gets you
@@ -287,6 +288,15 @@ uv run ruff format                       # format
 uv run ytscript --help                   # the CLI from the checkout
 ```
 
+Dependencies change through uv, so `uv.lock` moves with `pyproject.toml`:
+
+```bash
+uv add yt-dlp                            # or edit pyproject.toml, then: uv lock
+```
+
+`uv lock --check` gates both the push hook and the CI lint job, so a `pyproject.toml`
+edit that leaves the lockfile behind fails before it reaches review.
+
 The test suite fakes YouTube and the transcriber, so it needs no network, no model, no
 API key and neither extra installed.
 
@@ -295,7 +305,7 @@ transcription stacks and nothing needs both, so install one at a time.
 
 ### Hooks
 
-`pre-commit install --install-hooks` wires up two stages:
+`uv run pre-commit install --install-hooks` wires up two stages:
 
 | Stage | Runs |
 | --- | --- |
@@ -303,11 +313,13 @@ transcription stacks and nothing needs both, so install one at a time.
 | `pre-push` | `ruff check`, `ruff format --check`, `uv lock --check`, `pytest` |
 
 The commit hooks fix files; the push hooks only report, so a push fails on the same
-things CI would fail on. `git push --no-verify` skips them.
+things CI would fail on. Both run ruff and pytest through `uv run --frozen`, which keeps
+`uv.lock` the only place a tool version is set. `git push --no-verify` skips them.
 
 ### CI
 
-`.github/workflows/ci.yml` runs on every push to `main` and every pull request:
+`.github/workflows/ci.yml` runs on every push to `main`, every pull request, and on
+demand from the Actions tab:
 
 - **lint** — `uv lock --check`, `ruff check`, `ruff format --check`
 - **test** — pytest on Python 3.11, 3.12 and 3.13 on Linux, plus 3.13 on macOS and
