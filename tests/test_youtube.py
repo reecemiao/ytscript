@@ -1,10 +1,20 @@
 from __future__ import annotations
 
 from datetime import date
+from pathlib import Path
 
 import pytest
 
-from ytscript.youtube import YouTubeError, _iter_entries, _to_video, channel_uploads_url
+from ytscript.models import Video
+from ytscript.youtube import (
+    YouTubeClient,
+    YouTubeError,
+    _iter_entries,
+    _mentions_membership,
+    _to_video,
+    channel_uploads_url,
+    parse_browser_spec,
+)
 
 
 @pytest.mark.parametrize(
@@ -51,3 +61,54 @@ def test_iter_entries_flattens_nested_tabs() -> None:
         ],
     }
     assert [entry["id"] for entry in _iter_entries(info)] == ["a", "b", "c"]
+
+
+def test_to_video_flags_members_only_from_the_listing_badge() -> None:
+    assert _to_video({"id": "a", "availability": "subscriber_only"}).members_only
+    assert not _to_video({"id": "a", "availability": "public"}).members_only
+    assert not _to_video({"id": "a"}).members_only
+
+
+def test_membership_error_from_yt_dlp_is_recognised() -> None:
+    assert _mentions_membership(
+        "ERROR: [youtube] 58iGVbvDu9Q: Join this channel to get access to "
+        "members-only content like this video, and other exclusive perks."
+    )
+    assert not _mentions_membership("ERROR: [youtube] abc: Video unavailable")
+
+
+@pytest.mark.parametrize(
+    ("spec", "expected"),
+    [
+        ("firefox", ("firefox", None, None, None)),
+        ("Chrome", ("chrome", None, None, None)),
+        ("chrome:Profile 2", ("chrome", "Profile 2", None, None)),
+        ("chromium+gnomekeyring", ("chromium", None, "GNOMEKEYRING", None)),
+        ("firefox:dev-edition::personal", ("firefox", "dev-edition", None, "personal")),
+    ],
+)
+def test_parse_browser_spec(spec: str, expected: tuple[str | None, ...]) -> None:
+    assert parse_browser_spec(spec) == expected
+
+
+def test_parse_browser_spec_rejects_nonsense() -> None:
+    with pytest.raises(YouTubeError, match="cookies_from_browser"):
+        parse_browser_spec(":no-browser-name")
+
+
+def test_cookie_settings_reach_yt_dlp(tmp_path: Path) -> None:
+    client = YouTubeClient(
+        cookies_file=tmp_path / "cookies.txt", cookies_from_browser="firefox:dev"
+    )
+    opts = client._base_opts()
+    assert opts["cookiefile"] == str(tmp_path / "cookies.txt")
+    assert opts["cookiesfrombrowser"] == ("firefox", "dev", None, None)
+    assert client.signed_in
+
+    assert "cookiefile" not in YouTubeClient()._base_opts()
+
+
+def test_members_only_download_without_cookies_says_what_is_missing(tmp_path: Path) -> None:
+    video = Video(id="x", title="T", url="https://y/watch?v=x", members_only=True)
+    with pytest.raises(YouTubeError, match="members-only"):
+        YouTubeClient().download_audio(video, tmp_path)

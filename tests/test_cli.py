@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -109,3 +110,41 @@ def test_missing_channel_is_a_clean_error(
 def test_no_command_prints_help(capsys: pytest.CaptureFixture) -> None:
     assert cli.main([]) == 2
     assert "usage: ytscript" in capsys.readouterr().out
+
+
+def test_members_only_flags_override_the_config_file(project: Path) -> None:
+    parser = cli.build_parser()
+
+    args = parser.parse_args(["run", "--members-only", "--cookies-from-browser", "firefox"])
+    config = cli._config_from_args(args)
+    assert config.include_members_only is True
+    assert config.cookies_from_browser == "firefox"
+
+    args = parser.parse_args(["list", "--no-members-only"])
+    assert cli._config_from_args(args).include_members_only is False
+
+
+def test_run_says_how_many_members_only_videos_it_passed_over(
+    project: Path, fake_pipeline, capsys: pytest.CaptureFixture
+) -> None:
+    fake_pipeline.videos = [
+        replace(fake_pipeline.videos[0], members_only=True),
+        *fake_pipeline.videos[1:],
+    ]
+    assert cli.main(["run"]) == 0
+    out = capsys.readouterr().out
+    assert "skipped 1 members-only video(s)" in out
+    assert "--members-only" in out
+
+
+def test_list_marks_members_only_videos(
+    project: Path, fake_pipeline, capsys: pytest.CaptureFixture
+) -> None:
+    fake_pipeline.videos = [
+        replace(fake_pipeline.videos[0], members_only=True),
+        *fake_pipeline.videos[1:],
+    ]
+    assert cli.main(["list", "--limit", "2"]) == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[0].endswith("[members only]")
+    assert not lines[1].endswith("[members only]")

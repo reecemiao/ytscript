@@ -70,6 +70,12 @@ Useful flags on `run`:
 | `--timestamps` | Prefix each paragraph with `[hh:mm:ss]` |
 | `--dry-run` | List what is missing without downloading anything |
 | `--keep-audio` | Keep the downloaded audio next to the scripts |
+| `--members-only` | Also transcribe members-only videos (needs cookies) |
+| `--no-members-only` | Pass over members-only videos (the default) |
+| `--cookies FILE` | Netscape `cookies.txt` from a signed-in session |
+| `--cookies-from-browser firefox` | Read those cookies straight out of a browser |
+
+The cookie and members-only flags work on `list` too.
 
 ## Configuration
 
@@ -99,11 +105,67 @@ paragraph_gap = 2.0          # silence in seconds that starts a new paragraph
 state_file = ".ytscript-state.json"
 keep_audio = false
 audio_format = "bestaudio[ext=m4a]/bestaudio/best"
-# cookies_file = "cookies.txt"   # for age-restricted or member-only videos
+
+# Signing in — needed for members-only and age-restricted videos.
+# cookies_file = "cookies.txt"        # Netscape cookies.txt export
+# cookies_from_browser = "firefox"    # BROWSER[+KEYRING][:PROFILE][::CONTAINER]
+include_members_only = false          # true also transcribes members-only videos
 ```
 
 Every key has a matching environment variable: `YTSCRIPT_CHANNEL`,
 `YTSCRIPT_LANGUAGE`, `YTSCRIPT_BACKEND`, and so on.
+
+### Members-only videos
+
+A channel's members-only videos show up in its uploads listing, but YouTube refuses the
+audio to anyone who is not signed in as a member:
+
+```
+ERROR: [youtube] 58iGVbvDu9Q: Join this channel to get access to members-only content
+like this video, and other exclusive perks.
+```
+
+So `ytscript` passes over them by default and says how many it left:
+
+```
+checked 5 video(s); 3 already had a script
+skipped 1 members-only video(s); pass --members-only with cookies from a member account
+to include them
+```
+
+They are recognised from the "Members only" badge in the listing, so nothing is
+downloaded and nothing is written to the state file — the day the membership starts,
+they are picked up like any other unseen video.
+
+To transcribe them, point ytscript at cookies from an account that holds the membership
+and turn the setting on:
+
+```toml
+cookies_from_browser = "firefox"   # or cookies_file = "cookies.txt"
+include_members_only = true
+```
+
+or, for one run:
+
+```bash
+ytscript run --cookies-from-browser firefox --members-only
+```
+
+`cookies_from_browser` takes yt-dlp's `BROWSER[+KEYRING][:PROFILE][::CONTAINER]` syntax
+(`chrome`, `firefox:dev-edition`, `chromium+gnomekeyring`). It reads the browser's cookie
+store directly, which is the easier of the two: Chromium locks its database while it is
+running, so close the browser first, or use `cookies_file` with a `cookies.txt` export
+instead. Either way the cookies are a live login — keep the file out of version control.
+
+Turning `include_members_only` on without either cookie setting is refused up front,
+since every one of those downloads would fail. A signed-in run also gets you
+age-restricted videos, which fail the same way for the opposite reason.
+
+`ytscript list` always shows members-only videos, marked, whatever the setting says:
+
+```
+58iGVbvDu9Q  2024-05-01  Members-only Q&A  [members only]
+```
 
 ### Chinese
 

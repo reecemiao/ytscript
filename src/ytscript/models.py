@@ -43,6 +43,8 @@ class Video:
     upload_date: date | None = None
     duration: float | None = None
     description: str | None = None
+    members_only: bool = False
+    """Behind the channel's membership; only downloadable with a member's cookies."""
 
 
 @dataclass(frozen=True)
@@ -76,3 +78,5 @@ class RunReport:
     written: list[str] = field(default_factory=list)
     skipped: list[str] = field(default_factory=list)
     failed: list[tuple[str, str]] = field(default_factory=list)
+    members_only: list[str] = field(default_factory=list)
+    """Videos passed over because ``include_members_only`` is off."""

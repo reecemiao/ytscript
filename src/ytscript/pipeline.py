@@ -49,7 +49,9 @@ class Pipeline:
         config.validate()
         self.config = config
         self.client = client or YouTubeClient(
-            audio_format=config.audio_format, cookies_file=config.cookies_file
+            audio_format=config.audio_format,
+            cookies_file=config.cookies_file,
+            cookies_from_browser=config.cookies_from_browser,
         )
         self._transcriber = transcriber
 
@@ -80,6 +82,9 @@ class Pipeline:
 
         videos = self.client.latest_videos(config.channel, limit)
         report.checked = len(videos)
+        if not config.include_members_only:
+            report.members_only = [video.id for video in videos if video.members_only]
+            videos = [video for video in videos if not video.members_only]
         pending = select_videos(videos, state)
         report.skipped = [video.id for video in videos if state.seen(video.id)]
 
