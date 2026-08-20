@@ -1,0 +1,80 @@
+# Install both hook types once per checkout:
+#   uv run pre-commit install --install-hooks
+#
+# Ruff and pytest run through `uv run --frozen`, so the hooks, CI and a plain
+# `uv run` all use the versions pinned in uv.lock — there is no second place to
+# bump a tool version.
+#
+# Commit hooks fix what can be fixed. Push hooks re-check the same things
+# without touching files, plus the test suite: they are the gates CI runs, so a
+# red pipeline shows up before the push instead of after it.
+default_install_hook_types: [pre-commit, pre-push]
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+        stages: [pre-commit]
+      - id: end-of-file-fixer
+        stages: [pre-commit]
+      - id: check-yaml
+        stages: [pre-commit]
+      - id: check-toml
+        stages: [pre-commit]
+      - id: check-added-large-files
+        stages: [pre-commit]
+      - id: check-merge-conflict
+        stages: [pre-commit]
+
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: ruff check --fix
+        entry: uv run --frozen ruff check --fix --force-exclude
+        language: system
+        types_or: [python, pyi]
+        require_serial: true
+        stages: [pre-commit]
+
+      - id: ruff-format
+        name: ruff format
+        entry: uv run --frozen ruff format --force-exclude
+        language: system
+        types_or: [python, pyi]
+        require_serial: true
+        stages: [pre-commit]
+
+      # --- pre-push: read-only, and everything CI will run ---------------
+
+      - id: ruff-check-push
+        name: ruff check
+        entry: uv run --frozen ruff check --force-exclude
+        language: system
+        types_or: [python, pyi]
+        require_serial: true
+        stages: [pre-push]
+
+      - id: ruff-format-push
+        name: ruff format --check
+        entry: uv run --frozen ruff format --check --force-exclude
+        language: system
+        types_or: [python, pyi]
+        require_serial: true
+        stages: [pre-push]
+
+      - id: uv-lock-check
+        name: uv lock --check
+        entry: uv lock --check
+        language: system
+        files: ^(pyproject\.toml|uv\.lock)$
+        pass_filenames: false
+        stages: [pre-push]
+
+      - id: pytest
+        name: pytest
+        entry: uv run --frozen pytest -q
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
