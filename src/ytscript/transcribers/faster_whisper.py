@@ -49,8 +49,8 @@ class FasterWhisperTranscriber:
             from faster_whisper import WhisperModel  # noqa: PLC0415 - optional dependency
         except ImportError as exc:
             raise TranscriptionError(
-                "faster-whisper is not installed; install it with "
-                "'pip install \"ytscript[local]\"' or switch backend to 'openai'"
+                "faster-whisper is not installed; add it with "
+                "'uv sync --extra local' or switch backend to 'openai'"
             ) from exc
         try:
             self._model = WhisperModel(

@@ -36,8 +36,8 @@ class OpenAITranscriber:
             from openai import OpenAI  # noqa: PLC0415 - optional dependency
         except ImportError as exc:
             raise TranscriptionError(
-                "the openai package is not installed; install it with "
-                "'pip install \"ytscript[openai]\"' or switch backend to 'faster-whisper'"
+                "the openai package is not installed; add it with "
+                "'uv sync --extra openai' or switch backend to 'faster-whisper'"
             ) from exc
         api_key = self._api_key or os.environ.get(self.api_key_env)
         if not api_key:

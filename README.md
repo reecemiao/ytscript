@@ -9,23 +9,46 @@ and picks up whatever it has not seen before.
 
 ## Install
 
+ytscript is not published to PyPI, so it installs from this repository. It needs [uv],
+which pins the whole dependency graph through `uv.lock` — same versions here as in CI.
+From a checkout, which is what the rest of this README assumes:
+
 ```bash
-pip install "ytscript[local]"      # local transcription with faster-whisper
-pip install "ytscript[openai]"     # hosted transcription instead
+git clone https://github.com/reecemiao/ytscript
+cd ytscript
+uv sync --extra local              # local transcription with faster-whisper
+uv sync --extra openai             # hosted transcription instead
 ```
 
-From a checkout, with [uv]: `uv sync --extra local` — see [Development](#development).
+Commands then run as `uv run ytscript …`, or through `.venv/bin/ytscript` directly. To
+put `ytscript` on `PATH` without a checkout, install it from git as a uv tool:
+
+```bash
+uv tool install "ytscript[local] @ git+https://github.com/reecemiao/ytscript"
+```
 
 The `local` extra pulls in [faster-whisper]; the model itself (about 3 GB for the
 default `large-v3`) downloads on first use and is cached afterwards. Nothing leaves the
 machine. The `openai` extra needs `OPENAI_API_KEY` in the environment and charges per
-minute of audio, but needs no local model.
+minute of audio, but needs no local model. They are declared as conflicting extras — two
+transcription stacks, nothing needs both — so sync one at a time.
 
 **On an NVIDIA GPU, install the CUDA libraries too.** faster-whisper runs on
-[CTranslate2], which needs cuBLAS and cuDNN 9 and does not bundle them:
+[CTranslate2], which needs cuBLAS and cuDNN 9 and does not bundle them. In a checkout:
 
 ```bash
-pip install nvidia-cublas-cu12 "nvidia-cudnn-cu12>=9,<10"
+uv add nvidia-cublas-cu12 "nvidia-cudnn-cu12>=9,<10"
+```
+
+That writes them into `pyproject.toml` and `uv.lock`, which is what you want for a
+machine that always runs on the GPU — leave those edits uncommitted in a contributor
+checkout. For a one-off run instead, `uv run --with nvidia-cublas-cu12 --with
+"nvidia-cudnn-cu12>=9,<10" ytscript run`. A tool install takes the same libraries
+through `--with`:
+
+```bash
+uv tool install "ytscript[local] @ git+https://github.com/reecemiao/ytscript" \
+  --with nvidia-cublas-cu12 --with "nvidia-cudnn-cu12>=9,<10"
 ```
 
 Without them the model load fails on a missing `cudnn_ops64_9.dll` (Windows) or
@@ -34,7 +57,7 @@ the virtualenv have to be on `PATH` for the process. Check the setup before star
 backfill:
 
 ```bash
-python -c "from faster_whisper import WhisperModel; WhisperModel('large-v3', device='cuda', compute_type='float16'); print('ok')"
+uv run python -c "from faster_whisper import WhisperModel; WhisperModel('large-v3', device='cuda', compute_type='float16'); print('ok')"
 ```
 
 The default `whisper_device = "cuda"` makes a broken CUDA install fail loudly here
@@ -245,8 +268,8 @@ getting the batch size right.
 ytscript run --batch-size 8      # try a larger batch for one run
 ```
 
-Batching needs faster-whisper 1.1 or newer, which is what `ytscript[local]` installs. An
-older version logs a warning and transcribes sequentially.
+Batching needs faster-whisper 1.1 or newer, which is the floor the `local` extra sets and
+what `uv.lock` pins. An older version logs a warning and transcribes sequentially.
 
 ## Running it on a schedule
 
@@ -272,8 +295,8 @@ speech-to-text engine only has to match the small protocol in
 ## Development
 
 The project is managed with [uv] and linted and formatted with [ruff]. Both tool
-versions are pinned in `uv.lock`, so everyone — hooks, CI, a plain `uv run` — gets the
-same ones.
+versions are pinned in `uv.lock` too, so everyone — hooks, CI, a plain `uv run` — gets
+the same ones.
 
 ```bash
 uv sync                                  # dev environment, no transcription backend
@@ -298,10 +321,7 @@ uv add yt-dlp                            # or edit pyproject.toml, then: uv lock
 edit that leaves the lockfile behind fails before it reaches review.
 
 The test suite fakes YouTube and the transcriber, so it needs no network, no model, no
-API key and neither extra installed.
-
-`local` and `openai` are declared as conflicting extras: they are two separate
-transcription stacks and nothing needs both, so install one at a time.
+API key and neither extra installed — a bare `uv sync` is enough to run it.
 
 ### Hooks
 
