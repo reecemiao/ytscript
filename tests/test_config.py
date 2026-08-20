@@ -78,6 +78,7 @@ def test_defaults_target_local_whisper_on_an_nvidia_gpu() -> None:
     assert config.backend == "faster-whisper"
     assert (config.whisper_model, config.whisper_device) == ("large-v3", "cuda")
     assert config.whisper_compute_type == "float16"
+    assert config.whisper_batch_size == 4
 
 
 def test_initial_prompt_round_trips_from_file_and_env(tmp_path: Path) -> None:

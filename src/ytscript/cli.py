@@ -41,6 +41,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run.add_argument("--backend", choices=("faster-whisper", "openai"))
     run.add_argument("--whisper-model", dest="whisper_model", help="e.g. tiny, base, small, medium")
+    run.add_argument(
+        "--batch-size",
+        dest="whisper_batch_size",
+        type=int,
+        help="clips decoded at once; 1 turns batching off",
+    )
     run.add_argument("--output-dir", dest="output_dir", type=Path)
     run.add_argument(
         "--format",
@@ -72,6 +78,7 @@ _OVERRIDE_FIELDS = (
     "language",
     "backend",
     "whisper_model",
+    "whisper_batch_size",
     "output_dir",
     "output_formats",
     "timestamps",

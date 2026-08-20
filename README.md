@@ -63,6 +63,7 @@ Useful flags on `run`:
 | --- | --- |
 | `--channel @handle` | Override the configured channel |
 | `--language zh` | Override the main language (`auto` detects it) |
+| `--batch-size N` | Clips decoded at once; `1` turns batching off |
 | `--limit N` | Check the newest N videos, whatever the state file says |
 | `--backfill` | Check `initial_backfill` videos again (default 30) |
 | `--format txt,md,json` | Write more than one rendering |
@@ -88,6 +89,7 @@ whisper_model = "large-v3"   # tiny | base | small | medium | large-v3 | distil-
 whisper_device = "cuda"      # "cpu", "cuda", ...
 whisper_compute_type = "float16"   # "int8" on CPU, "float16" on GPU
 whisper_initial_prompt = "以下是普通话的句子。"   # seeds simplified characters
+whisper_batch_size = 4       # clips decoded at once; 1 turns batching off
 
 output_dir = "scripts"
 output_formats = ["txt"]     # any of txt, md, json
@@ -136,28 +138,52 @@ card can hold — Chinese is one of the languages where the jump from `small` to
 `large-v3` is largest, and a card with 8 GB has the room. Approximate cost of a
 30-minute video on a laptop RTX 4070 (8 GB):
 
-| Model | Compute type | VRAM | 30 min of audio |
+| Model | Compute type | VRAM at `whisper_batch_size = 4` | 30 min of audio |
 | --- | --- | --- | --- |
-| `large-v3` | `float16` | ~5 GB | 2–4 min |
-| `large-v3` | `int8_float16` | ~3 GB | 2–4 min, slightly less accurate |
-| `medium` | `float16` | ~2.5 GB | 1–2 min |
-| `small` | `float16` | ~1 GB | <1 min, clearly worse on Chinese |
-| `small` | `int8` on CPU | — | 6–12 min |
+| `large-v3` | `float16` | ~6 GB | 1–2 min |
+| `large-v3` | `int8_float16` | ~4 GB | 1–2 min, slightly less accurate |
+| `medium` | `float16` | ~3.5 GB | under a minute |
+| `small` | `float16` | ~2 GB | under a minute, clearly worse on Chinese |
+| `small` | `int8` on CPU | — | 6–12 min, batching does not apply |
 
 Times are a ballpark; they move with audio quality and how much the VAD filter trims.
 
-If a long video runs out of memory — a game or a browser is sharing the card — move to
-`whisper_compute_type = "int8_float16"` before dropping to a smaller model. Quantising
-costs far less accuracy than `large-v3` → `medium` does. On a machine with no NVIDIA GPU,
-set `whisper_device = "cpu"` and `whisper_compute_type = "int8"`.
+If a long video runs out of memory — a game or a browser is sharing the card — lower
+`whisper_batch_size` first, then move to `whisper_compute_type = "int8_float16"`. Drop to
+a smaller model last: quantising costs far less accuracy than `large-v3` → `medium` does.
+On a machine with no NVIDIA GPU, set `whisper_device = "cpu"` and
+`whisper_compute_type = "int8"`.
 
 `distil-large-v3` is worth knowing about but not for this: it is English-only. For
 Chinese the choice is between the full `large-v3` and a smaller multilingual model.
 
 At those rates the first run — `initial_backfill = 30` videos of about 30 minutes each,
-some 15 hours of audio — takes roughly one to two hours of GPU time plus downloads. It
+some 15 hours of audio — takes roughly 30 to 60 minutes of GPU time plus downloads. It
 writes state after every video, so it can be interrupted and resumed. Later runs only
 look at `check_limit` videos and usually transcribe nothing.
+
+### Batching
+
+`whisper_batch_size` decides how many 30-second clips are decoded at once. Batching is
+the cheapest speedup available — typically two to four times faster than one clip at a
+time, for the same transcript — so it is on by default.
+
+What it costs is VRAM, and the beam search multiplies it: `whisper_batch_size = 4` at the
+default beam size means 20 concurrent decode streams. 4 is the default because it leaves
+headroom on an 8 GB card that is also driving a display; a 12 GB or larger card can take
+8 or 16. Set it to `1` to turn batching off entirely.
+
+Getting it wrong is not fatal. A batch that does not fit is caught, logged, and that one
+video is retried a clip at a time, so a run finishes rather than failing halfway. If that
+warning shows up on every video, lower the setting — the retry is much slower than
+getting the batch size right.
+
+```bash
+ytscript run --batch-size 8      # try a larger batch for one run
+```
+
+Batching needs faster-whisper 1.1 or newer, which is what `ytscript[local]` installs. An
+older version logs a warning and transcribes sequentially.
 
 ## Running it on a schedule
 

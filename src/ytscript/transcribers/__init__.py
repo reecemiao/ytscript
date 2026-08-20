@@ -24,6 +24,7 @@ def build_transcriber(config: Config) -> Transcriber:
             device=config.whisper_device,
             compute_type=config.whisper_compute_type,
             initial_prompt=config.whisper_initial_prompt,
+            batch_size=config.whisper_batch_size,
         )
     if config.backend == "openai":
         return OpenAITranscriber(
