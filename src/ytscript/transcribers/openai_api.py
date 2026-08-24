@@ -23,10 +23,12 @@ class OpenAITranscriber:
         model: str = "whisper-1",
         api_key_env: str = "OPENAI_API_KEY",
         api_key: str | None = None,
+        initial_prompt: str | None = None,
     ) -> None:
         self.model = model
         self.api_key_env = api_key_env
         self._api_key = api_key
+        self.initial_prompt = initial_prompt
         self._client: Any = None
 
     def _load_client(self) -> Any:
@@ -46,7 +48,7 @@ class OpenAITranscriber:
         return self._client
 
     def transcribe(
-        self, audio_path: Path, language: str | None = None
+        self, audio_path: Path, language: str | None = None, prompt: str | None = None
     ) -> tuple[list[Segment], str | None]:
         client = self._load_client()
         size = audio_path.stat().st_size
@@ -63,6 +65,9 @@ class OpenAITranscriber:
         }
         if language:
             kwargs["language"] = language
+        # The endpoint takes the same kind of priming text as the local model.
+        if prompt or self.initial_prompt:
+            kwargs["prompt"] = prompt or self.initial_prompt
         try:
             with audio_path.open("rb") as handle:
                 response = client.audio.transcriptions.create(file=handle, **kwargs)

@@ -34,7 +34,8 @@ machine. The `openai` extra needs `OPENAI_API_KEY` in the environment and charge
 minute of audio, but needs no local model. They are declared as conflicting extras — two
 transcription stacks, nothing needs both — so sync one at a time. The `drive` extra
 is independent of both and adds the Google client libraries for [saving the scripts to
-Google Drive](#google-drive).
+Google Drive](#google-drive), as is the `zh` extra, which adds [OpenCC] for rewriting
+traditional characters as simplified.
 
 **On an NVIDIA GPU, install the CUDA libraries too.** faster-whisper runs on
 [CTranslate2], which needs cuBLAS and cuDNN 9 and does not bundle them. In a checkout:
@@ -77,6 +78,8 @@ ytscript drive-auth              # optional: sign in to Google Drive once
 ytscript run --dry-run           # what would be transcribed
 ytscript run                     # first run: the latest 30 videos
 ytscript run                     # later runs: only what is new
+
+ytscript polish scripts          # re-clean scripts already written
 ```
 
 Scripts land in `output_dir` as `2024-05-01_Video-title_VIDEOID.txt`, and every finished
@@ -91,6 +94,7 @@ Useful flags on `run`:
 | `--channel @handle` | Override the configured channel |
 | `--language zh` | Override the main language (`auto` detects it) |
 | `--batch-size N` | Clips decoded at once; `1` turns batching off |
+| `--vocabulary NAME` | Terms and rewrites for the channel: a built-in name or a file |
 | `--limit N` | Check the newest N videos, whatever the state file says |
 | `--backfill` | Check `initial_backfill` videos again (default 30) |
 | `--format txt,md,json` | Write more than one rendering |
@@ -105,6 +109,11 @@ Useful flags on `run`:
 | `--cookies-from-browser firefox` | Read those cookies straight out of a browser |
 
 The cookie and members-only flags work on `list` too.
+
+`ytscript polish` runs the same clean-up a run does over scripts that already exist —
+useful after adding a term to the vocabulary, or on a backlog transcribed before it had
+one. It takes files or directories (`.txt` and `.md`), rewrites them in place, and has
+`--vocabulary NAME`, `--simplified` and `--dry-run`.
 
 ## Configuration
 
@@ -125,11 +134,17 @@ whisper_device = "cuda"      # "cpu", "cuda", ...
 whisper_compute_type = "float16"   # "int8" on CPU, "float16" on GPU
 whisper_initial_prompt = "以下是普通话的句子。"   # seeds simplified characters
 whisper_batch_size = 4       # clips decoded at once; 1 turns batching off
+whisper_condition_on_previous_text = false   # false stops the model looping a phrase
+
+prompt_from_metadata = true  # prime each video with its own title and description
+vocabulary = "zh-finance"    # terms and rewrites; a built-in name or a file path
 
 output_dir = "scripts"
 output_formats = ["txt"]     # any of txt, md, json
 timestamps = false
 paragraph_gap = 2.0          # silence in seconds that starts a new paragraph
+polish = true                # tidy punctuation, looped phrases and known bad spellings
+convert_to_simplified = false   # traditional -> simplified; needs --extra zh
 
 state_file = ".ytscript-state.json"
 keep_audio = false
@@ -224,13 +239,72 @@ whisper_initial_prompt = "以下是普通话的句子。"   # simplified
 whisper_initial_prompt = "以下是普通話的句子。"   # traditional
 ```
 
-It is a nudge, not a guarantee — a few characters can still come out the other way. If
-the output has to be uniform, run a converter such as [OpenCC] over the scripts
-afterwards. The prompt also matters if you change `language`: a Chinese seed on English
-audio makes the transcription worse, so change or remove it along with the language.
+It is a nudge, not a guarantee — a few characters can still come out the other way. For
+uniform output, `uv sync --extra zh` and set `convert_to_simplified = true`, which runs
+[OpenCC] over the text before it is written; without the extra installed the setting
+warns once and leaves the characters alone. The prompt also matters if you change
+`language`: a Chinese seed on English audio makes the transcription worse, so change or
+remove it along with the language. Leaving `whisper_initial_prompt` out of the config
+entirely gets the stock sentence for `language`; `whisper_initial_prompt = ""` gets no
+seed at all.
 
 Output is written with no spaces between Chinese segments, the way the language is
 written; a Latin word inside a sentence still keeps the spaces on either side of it.
+
+### Getting the words right
+
+Whisper decodes a word it is expecting far more readily than one it is not, and the
+words a niche channel leans on — tickers, index nicknames, the host's own name — are
+exactly the ones a general model has no reason to expect. Left alone it guesses at the
+sounds: 费半 (a Mandarin nickname for the Philadelphia semiconductor index) comes out as
+飞班 or 肺瓣, 对冲基金 as 对中基金, 资产负债表 as 自然负债表, SNDK as `S&DK`.
+
+Three settings work on this, and they stack:
+
+- **`prompt_from_metadata`** (on by default) puts the video's own title and the first
+  line of its description in front of the model as the transcript so far. A title like
+  `半导体、ASML、TSM、NFLX、ISRG、MU、SNDK` names most of the day's tickers before a word
+  of audio is decoded, and it costs nothing — the metadata is already downloaded.
+- **`vocabulary`** adds the terms the channel says every episode, and rewrites what the
+  model gets wrong anyway. `"zh-finance"` ships with ytscript for a Mandarin US-market
+  channel; the file is small, commented and meant to be copied:
+
+  ```bash
+  cp "$(uv run python -c 'import ytscript.vocabulary as v; print(v.DATA_DIR)')/zh-finance.txt" mine.txt
+  ```
+
+  ```
+  # a term is seeded into the prompt
+  杰克逊霍尔
+  # a rewrite is seeded and applied to the output
+  对中基金 => 对冲基金
+  CTS => CDS
+  ```
+
+  Rewrites are literal, not regular expressions. An ASCII left-hand side only matches as
+  a whole word, so `CTS` never fires inside `CTSX`; a Chinese one matches anywhere, since
+  the language has no word boundaries to key on. Point `vocabulary` at your copy and add
+  to it as you read the scripts — the mistakes a model makes are specific to the voice.
+
+- **`polish`** (on by default) cleans the text after recognition: Chinese sentences get
+  the fullwidth punctuation they are written with (`大家好,` → `大家好，`), while the
+  commas in `1,250` and the colon in a URL are left alone; a phrase the model looped on
+  is kept once instead of a dozen times; and the vocabulary's rewrites are applied.
+
+The prompt is capped at 200 characters, because Whisper conditions on about 224 tokens
+and silently drops the rest. The seed sentence and the video's own subject go in first,
+then terms — the ones named in the title before the rest, since those are the words the
+episode actually says.
+
+`whisper_condition_on_previous_text` is the other accuracy setting, and ytscript
+defaults it to `false` where Whisper's own default is `true`. Feeding each clip the text
+of the one before it is what makes the model repeat a phrase for a minute once the audio
+goes quiet. Batched decoding has no previous clip to condition on and behaves as if the
+flag were off regardless, so `false` also keeps batched and sequential runs — including
+the one-clip-at-a-time retry after an out-of-memory error — sounding the same.
+
+None of this touches the audio, so a script can be re-cleaned without re-transcribing:
+add the term, then `ytscript polish scripts`.
 
 ### Choosing a model
 

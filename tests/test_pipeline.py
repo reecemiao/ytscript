@@ -6,6 +6,7 @@ from pathlib import Path
 
 from fakes import FakeTranscriber, FakeYouTubeClient, make_videos
 from ytscript.config import Config
+from ytscript.models import Segment
 from ytscript.pipeline import Pipeline, select_videos
 from ytscript.state import State
 
@@ -189,3 +190,44 @@ def test_members_only_videos_are_taken_when_signed_in(tmp_path: Path) -> None:
 
     assert report.members_only == []
     assert sorted(client.downloaded) == ["vid000", "vid001", "vid002"]
+
+
+def test_the_video_primes_the_model_with_its_own_title(tmp_path: Path) -> None:
+    videos = make_videos(1)
+    _, _, transcriber = build(tmp_path, videos)
+    pipeline, _, transcriber = build(tmp_path, videos, language="zh")
+    pipeline.run()
+    assert transcriber.prompts == ["以下是普通话的句子。Episode 0"]
+
+
+def test_the_vocabulary_joins_the_prompt_and_fixes_the_text(tmp_path: Path) -> None:
+    glossary = tmp_path / "glossary.txt"
+    glossary.write_text("对中基金 => 对冲基金\n", encoding="utf-8")
+    client = FakeYouTubeClient(make_videos(1))
+    transcriber = FakeTranscriber(
+        language="zh", segments=[Segment(0.0, 2.0, "对中基金的仓位,很重")]
+    )
+    config = make_config(tmp_path, language="zh", vocabulary=str(glossary))
+    pipeline = Pipeline(config, client=client, transcriber=transcriber)
+    pipeline.run()
+
+    assert "对冲基金" in (transcriber.prompts[0] or "")
+    written = next((tmp_path / "scripts").glob("*.txt")).read_text(encoding="utf-8")
+    assert "对冲基金的仓位，很重" in written
+
+
+def test_metadata_priming_can_be_turned_off(tmp_path: Path) -> None:
+    pipeline, _, transcriber = build(
+        tmp_path, make_videos(1), language="zh", prompt_from_metadata=False
+    )
+    pipeline.run()
+    assert transcriber.prompts == ["以下是普通话的句子。"]
+
+
+def test_polish_off_leaves_the_text_exactly_as_recognised(tmp_path: Path) -> None:
+    client = FakeYouTubeClient(make_videos(1))
+    transcriber = FakeTranscriber(language="zh", segments=[Segment(0.0, 2.0, "重仓,很重")])
+    config = make_config(tmp_path, language="zh", polish=False)
+    Pipeline(config, client=client, transcriber=transcriber).run()
+    written = next((tmp_path / "scripts").glob("*.txt")).read_text(encoding="utf-8")
+    assert "重仓,很重" in written

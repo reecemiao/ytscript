@@ -236,3 +236,34 @@ def test_drive_auth_reports_where_the_scripts_will_go(
     out = capsys.readouterr().out
     assert "token is cached in" in out
     assert "folder-id" in out
+
+
+def test_polish_rewrites_scripts_that_are_already_on_disk(
+    project: Path, capsys: pytest.CaptureFixture
+) -> None:
+    scripts = project / "scripts"
+    scripts.mkdir()
+    (scripts / "one.txt").write_text("飞班收跌,收盘", encoding="utf-8")
+    (scripts / "two.txt").write_text("没有问题。", encoding="utf-8")
+    (scripts / "notes.csv").write_text("飞班", encoding="utf-8")
+
+    assert cli.main(["polish", "scripts", "--vocabulary", "zh-finance", "--dry-run"]) == 0
+    out = capsys.readouterr().out
+    assert "would rewrite 1 of 2 file(s)" in out
+    assert (scripts / "one.txt").read_text(encoding="utf-8") == "飞班收跌,收盘"
+
+    assert cli.main(["polish", "scripts", "--vocabulary", "zh-finance"]) == 0
+    assert "rewrote 1 of 2 file(s)" in capsys.readouterr().out
+    assert (scripts / "one.txt").read_text(encoding="utf-8") == "费半收跌，收盘"
+    # A file that was already clean is not rewritten, and neither is the CSV.
+    assert (scripts / "notes.csv").read_text(encoding="utf-8") == "飞班"
+
+
+def test_polish_says_when_a_path_is_missing(project: Path, capsys: pytest.CaptureFixture) -> None:
+    assert cli.main(["polish", "nowhere"]) == 1
+    assert "no such file or directory" in capsys.readouterr().err
+
+
+def test_an_unknown_vocabulary_stops_the_run(project: Path, capsys: pytest.CaptureFixture) -> None:
+    assert cli.main(["run", "--vocabulary", "nope"]) == 1
+    assert "no vocabulary 'nope'" in capsys.readouterr().err

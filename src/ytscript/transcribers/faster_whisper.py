@@ -31,6 +31,7 @@ class FasterWhisperTranscriber:
         beam_size: int = 5,
         initial_prompt: str | None = None,
         batch_size: int = 4,
+        condition_on_previous_text: bool = False,
     ) -> None:
         self.model_name = model
         self.device = device
@@ -39,6 +40,7 @@ class FasterWhisperTranscriber:
         self.beam_size = beam_size
         self.initial_prompt = initial_prompt
         self.batch_size = batch_size
+        self.condition_on_previous_text = condition_on_previous_text
         self._model: Any = None
         self._batched: Any = None
 
@@ -79,14 +81,19 @@ class FasterWhisperTranscriber:
         return BatchedInferencePipeline(model=model)
 
     def _run(
-        self, engine: Any, audio_path: Path, language: str | None, **extra: Any
+        self,
+        engine: Any,
+        audio_path: Path,
+        language: str | None,
+        prompt: str | None,
+        **extra: Any,
     ) -> tuple[list[Segment], Any]:
         raw_segments, info = engine.transcribe(
             str(audio_path),
             language=language,
             beam_size=self.beam_size,
             vad_filter=self.vad_filter,
-            initial_prompt=self.initial_prompt,
+            initial_prompt=prompt or self.initial_prompt,
             **extra,
         )
         # The segment iterator is lazy — this is where the decoding actually runs,
@@ -98,16 +105,19 @@ class FasterWhisperTranscriber:
         return segments, info
 
     def transcribe(
-        self, audio_path: Path, language: str | None = None
+        self, audio_path: Path, language: str | None = None, prompt: str | None = None
     ) -> tuple[list[Segment], str | None]:
         model = self._load_model()
+        # Only the sequential engine takes this: batched decoding has no previous
+        # clip to condition on, so it behaves as if the flag were off.
+        sequential = {"condition_on_previous_text": self.condition_on_previous_text}
         try:
             if self._batched is None:
-                segments, info = self._run(model, audio_path, language)
+                segments, info = self._run(model, audio_path, language, prompt, **sequential)
             else:
                 try:
                     segments, info = self._run(
-                        self._batched, audio_path, language, batch_size=self.batch_size
+                        self._batched, audio_path, language, prompt, batch_size=self.batch_size
                     )
                 except Exception as exc:
                     if not _is_out_of_memory(exc):
@@ -120,7 +130,7 @@ class FasterWhisperTranscriber:
                         audio_path.name,
                         self.batch_size,
                     )
-                    segments, info = self._run(model, audio_path, language)
+                    segments, info = self._run(model, audio_path, language, prompt, **sequential)
         except Exception as exc:
             raise TranscriptionError(f"transcription of {audio_path.name} failed: {exc}") from exc
         detected = language or getattr(info, "language", None)

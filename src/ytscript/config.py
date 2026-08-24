@@ -8,6 +8,8 @@ from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Any
 
+from .vocabulary import VocabularyError, load_vocabulary
+
 DEFAULT_CONFIG_NAMES = ("ytscript.toml", ".ytscript.toml")
 ENV_PREFIX = "YTSCRIPT_"
 
@@ -45,7 +47,22 @@ class Config:
     """Defaults target an 8 GB NVIDIA card; see the README for the CPU-only settings."""
 
     whisper_initial_prompt: str | None = None
-    """Seed text that steers spelling and register — for Chinese, simplified vs traditional."""
+    """Seed text that steers spelling and register — for Chinese, simplified vs traditional.
+
+    ``None`` uses the stock sentence for ``language``; set it to ``""`` for no seed."""
+
+    whisper_condition_on_previous_text: bool = False
+    """Feed each clip the previous clip's text. Whisper's own default is on, and it is
+    what makes the model repeat a phrase for a minute once it starts. Batched decoding
+    turns it off regardless, so leaving it off also keeps the two paths in step."""
+
+    prompt_from_metadata: bool = True
+    """Prime each video with its own title and description, so the day's tickers and
+    names are words the model is already expecting."""
+
+    vocabulary: str | None = None
+    """Terms the channel says every episode, and rewrites for what the model gets wrong.
+    A built-in name (``"zh-finance"``) or the path to your own file."""
 
     whisper_batch_size: int = 4
     """Clips decoded at once. ``1`` turns batching off; 4 suits large-v3 on an 8 GB card."""
@@ -61,6 +78,13 @@ class Config:
 
     paragraph_gap: float = 2.0
     """Silence in seconds between segments that starts a new paragraph."""
+
+    polish: bool = True
+    """Tidy the recognised text before writing it: fullwidth punctuation for Chinese
+    sentences, one copy of a looped phrase, and the vocabulary's rewrites."""
+
+    convert_to_simplified: bool = False
+    """Rewrite traditional characters as simplified ones. Needs 'uv sync --extra zh'."""
 
     # --- Google Drive (optional) -----------------------------------------
     drive_upload: bool = False
@@ -152,6 +176,11 @@ class Config:
             raise ConfigError("check_limit must be at least 1")
         if self.whisper_batch_size < 1:
             raise ConfigError("whisper_batch_size must be at least 1 (1 turns batching off)")
+        # Reading the file now means a typo fails the command, not the first video.
+        try:
+            load_vocabulary(self.vocabulary)
+        except VocabularyError as exc:
+            raise ConfigError(str(exc)) from exc
         if self.include_members_only and not (self.cookies_file or self.cookies_from_browser):
             raise ConfigError(
                 "include_members_only needs a signed-in session: set cookies_file or "
@@ -286,9 +315,25 @@ whisper_device = "cuda"
 whisper_compute_type = "float16"
 
 # Whisper transcribes Mandarin into traditional characters about as readily as
-# simplified. A simplified-character seed sentence settles it. Change or clear
-# this if you change `language`.
+# simplified. A simplified-character seed sentence settles it. Leave it unset to
+# get the stock sentence for `language`, or set it to "" for no seed at all.
 whisper_initial_prompt = "以下是普通话的句子。"
+
+# The seed is followed by the video's own title and description, so the tickers
+# and names that episode is about are words the model already expects.
+prompt_from_metadata = true
+
+# Terms the channel says every episode, plus rewrites for the ones the model
+# keeps getting wrong ("对中基金 => 对冲基金"). "zh-finance" ships with ytscript
+# and suits a Mandarin US-market channel; point this at your own file to extend
+# it — `python -c "import ytscript.vocabulary as v; print(v.DATA_DIR)"` finds the
+# built-in to copy. Leave it out for no vocabulary.
+vocabulary = "zh-finance"
+
+# Whisper's own default feeds each clip the text of the one before it, which is
+# what makes it repeat a phrase for a minute when the audio goes quiet. Off also
+# matches what batched decoding does, so both paths sound the same.
+whisper_condition_on_previous_text = false
 
 # Clips decoded at once — several times faster than one at a time, at the cost
 # of VRAM. 4 leaves headroom on an 8 GB card; a 12 GB or larger card can take
@@ -298,6 +343,13 @@ whisper_batch_size = 4
 output_dir = "scripts"
 output_formats = ["txt"]
 timestamps = false
+
+# Tidy the text before writing: fullwidth punctuation for Chinese sentences, one
+# copy of a phrase the model looped on, and the vocabulary's rewrites.
+polish = true
+
+# Rewrite traditional characters as simplified. Needs `uv sync --extra zh`.
+convert_to_simplified = false
 
 state_file = ".ytscript-state.json"
 keep_audio = false
