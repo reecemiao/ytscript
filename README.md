@@ -318,7 +318,12 @@ that starts with `"web"` came from the wrong application type, and one holding
 unattended run dies a week after you authorised it. Publishing costs nothing and is
 instant: the default `drive.file` scope is not a sensitive one, so Google does not put
 the app through its verification review. Leaving it in `Testing` also means adding your
-own account under **Audience → Test users**, since a testing app refuses everyone else.
+own account under **Audience → Test users**, since a testing app refuses everyone else;
+once it is published, that list stops mattering.
+
+Publishing does not rescue a token you already have. The 7 days are stamped on the
+refresh token when it is issued, so a sign-in from before the app was published still
+stops working a week later. Delete `drive_token_file` and run `drive-auth` again.
 The wider `drive` scope *is* restricted and does need that review before it can be
 published, which is one more reason to leave `drive_scope` alone unless an existing
 folder makes it necessary — or to use a service account, which none of this applies to.
