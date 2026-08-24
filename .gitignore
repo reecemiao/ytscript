@@ -224,3 +224,8 @@ scripts/
 ytscript.toml
 # A signed-in YouTube session, for members-only and age-restricted videos.
 cookies.txt
+# Google Drive: the OAuth client secrets, the cached sign-in, a service account key.
+drive-credentials.json
+drive-service-account.json
+.ytscript-drive-token.json
+*.ytscript-drive-token.json

@@ -18,6 +18,7 @@ git clone https://github.com/reecemiao/ytscript
 cd ytscript
 uv sync --extra local              # local transcription with faster-whisper
 uv sync --extra openai             # hosted transcription instead
+uv sync --extra local --extra drive   # ... plus uploads to Google Drive
 ```
 
 Commands then run as `uv run ytscript …`, or through `.venv/bin/ytscript` directly. To
@@ -31,7 +32,9 @@ The `local` extra pulls in [faster-whisper]; the model itself (about 3 GB for th
 default `large-v3`) downloads on first use and is cached afterwards. Nothing leaves the
 machine. The `openai` extra needs `OPENAI_API_KEY` in the environment and charges per
 minute of audio, but needs no local model. They are declared as conflicting extras — two
-transcription stacks, nothing needs both — so sync one at a time.
+transcription stacks, nothing needs both — so sync one at a time. The `drive` extra
+is independent of both and adds the Google client libraries for [saving the scripts to
+Google Drive](#google-drive).
 
 **On an NVIDIA GPU, install the CUDA libraries too.** faster-whisper runs on
 [CTranslate2], which needs cuBLAS and cuDNN 9 and does not bundle them. In a checkout:
@@ -70,6 +73,7 @@ ytscript init                    # write a starter ytscript.toml
 $EDITOR ytscript.toml            # set the channel and the language
 
 ytscript list                    # newest videos on the channel
+ytscript drive-auth              # optional: sign in to Google Drive once
 ytscript run --dry-run           # what would be transcribed
 ytscript run                     # first run: the latest 30 videos
 ytscript run                     # later runs: only what is new
@@ -93,6 +97,8 @@ Useful flags on `run`:
 | `--timestamps` | Prefix each paragraph with `[hh:mm:ss]` |
 | `--dry-run` | List what is missing without downloading anything |
 | `--keep-audio` | Keep the downloaded audio next to the scripts |
+| `--drive` / `--no-drive` | Also copy each script into Google Drive, or not |
+| `--drive-folder ID` | The Drive folder they go into |
 | `--members-only` | Also transcribe members-only videos (needs cookies) |
 | `--no-members-only` | Pass over members-only videos (the default) |
 | `--cookies FILE` | Netscape `cookies.txt` from a signed-in session |
@@ -128,6 +134,15 @@ paragraph_gap = 2.0          # silence in seconds that starts a new paragraph
 state_file = ".ytscript-state.json"
 keep_audio = false
 audio_format = "bestaudio[ext=m4a]/bestaudio/best"
+
+# Optional: copy every finished script into Google Drive as well.
+drive_upload = false
+drive_folder_name = "ytscript"     # folder made in My Drive; "" uploads to the root
+# drive_folder_id = "1AbC..."      # an existing folder instead (id or its URL)
+# drive_credentials_file = "drive-credentials.json"        # OAuth client secrets
+drive_token_file = ".ytscript-drive-token.json"            # written by `drive-auth`
+# drive_service_account_file = "drive-service-account.json"  # unattended runs
+drive_scope = "drive.file"         # or "drive", for a folder ytscript did not create
 
 # Signing in — needed for members-only and age-restricted videos.
 # cookies_file = "cookies.txt"        # Netscape cookies.txt export
@@ -271,6 +286,105 @@ ytscript run --batch-size 8      # try a larger batch for one run
 Batching needs faster-whisper 1.1 or newer, which is the floor the `local` extra sets and
 what `uv.lock` pins. An older version logs a warning and transcribes sequentially.
 
+## Google Drive
+
+Optional: with `drive_upload` on, every script ytscript writes is also copied into
+Google Drive. The local files under `output_dir` are written either way — Drive is a
+copy, not a destination — so turning this off later changes nothing about the scripts
+already on disk.
+
+```bash
+uv sync --extra drive            # or: uv sync --extra local --extra drive
+```
+
+Google needs to know which application is asking, which is a one-time setup in the
+[Google Cloud console]:
+
+1. Create a project, then enable the **Google Drive API** for it.
+2. Under **APIs & Services → Credentials**, create an **OAuth client ID** of type
+   **Desktop app** and download its JSON.
+3. On the **OAuth consent screen**, add your own Google account as a test user — an app
+   in testing mode refuses everyone else.
+
+Save that JSON in the checkout (`drive-credentials.json` is in `.gitignore`), point the
+setting at it, and sign in once:
+
+```toml
+drive_upload = true
+drive_credentials_file = "drive-credentials.json"
+drive_folder_name = "ytscript"
+```
+
+```bash
+ytscript drive-auth              # opens a browser, then caches the token
+ytscript run
+```
+
+`drive-auth` opens the Google sign-in in a browser on the machine it runs on and writes
+the result to `drive_token_file`. Runs after that need no browser: the token refreshes
+itself, which is what makes an unattended `ytscript run` work. It is a live login to
+your Drive, so it is kept at mode 600 and is in `.gitignore`. Delete the file and run
+`drive-auth` again to sign in as someone else.
+
+A run reports what went up:
+
+```
+wrote 2 file(s):
+  scripts/2024-05-01_Video-title_VIDEOID.txt
+  scripts/2024-05-02_Another-one_VIDEOID2.txt
+uploaded 2 file(s) to Google Drive:
+  2024-05-01_Video-title_VIDEOID.txt  https://drive.google.com/file/d/.../view
+  2024-05-02_Another-one_VIDEOID2.txt  https://drive.google.com/file/d/.../view
+```
+
+The Drive file id and link of every upload go into the state file next to the local
+paths. Uploads are matched by file name inside the folder, so re-transcribing a video
+replaces its copy in Drive instead of leaving a second one called `... (1)`.
+
+Sign-in happens once, before the first download, so a token that has gone stale costs a
+second rather than a whole backfill. If an upload itself fails, that video counts as
+failed: it is not written to the state file, and the next run transcribes and uploads it
+again.
+
+### Where the files land
+
+`drive_folder_name` (default `ytscript`) is a folder ytscript creates in My Drive on the
+first upload and reuses afterwards. Set it to `""` to upload straight to the root of My
+Drive.
+
+To use a folder that already exists, give its id — or just paste the URL you see when
+the folder is open, `https://drive.google.com/drive/folders/1AbC...`, which ytscript
+reads the id out of:
+
+```toml
+drive_folder_id = "1AbC..."
+drive_scope = "drive"
+```
+
+`drive_scope` is why that second line is there. The default `drive.file` is per-file
+access: ytscript can only see files it uploaded itself, which is the narrowest thing
+that works and keeps the rest of your Drive out of reach. A folder made in the Drive web
+interface is not one of those files, so reaching it needs the wider `drive` scope.
+Changing the scope invalidates the cached sign-in — delete `drive_token_file` and run
+`drive-auth` again.
+
+### Unattended, without a browser
+
+A service account signs in with a key file instead of a browser, which suits a server
+that has neither. Create one in the same Cloud project, download its JSON key, then
+share a Drive folder with the account's `...iam.gserviceaccount.com` address (Editor)
+and point ytscript at both:
+
+```toml
+drive_upload = true
+drive_service_account_file = "drive-service-account.json"
+drive_folder_id = "1AbC..."      # the folder shared with the service account
+```
+
+`drive_folder_id` is required here: a service account has no Drive of its own to write
+to, and ytscript refuses the combination up front rather than failing on the first
+upload. Set `drive_credentials_file` or `drive_service_account_file`, not both.
+
 ## Running it on a schedule
 
 `ytscript run` is idempotent, so a cron entry is enough:
@@ -320,8 +434,9 @@ uv add yt-dlp                            # or edit pyproject.toml, then: uv lock
 `uv lock --check` gates both the push hook and the CI lint job, so a `pyproject.toml`
 edit that leaves the lockfile behind fails before it reaches review.
 
-The test suite fakes YouTube and the transcriber, so it needs no network, no model, no
-API key and neither extra installed — a bare `uv sync` is enough to run it.
+The test suite fakes YouTube, the transcriber and Google Drive, so it needs no network,
+no model, no API key, no Google credentials and no extra installed — a bare `uv sync` is
+enough to run it.
 
 ### Hooks
 
@@ -349,6 +464,7 @@ demand from the Actions tab:
 - **build** — `uv build`, then installs the wheel in a clean environment and runs
   `ytscript --help`
 
+[Google Cloud console]: https://console.cloud.google.com/
 [uv]: https://docs.astral.sh/uv/
 [ruff]: https://docs.astral.sh/ruff/
 [faster-whisper]: https://github.com/SYSTRAN/faster-whisper

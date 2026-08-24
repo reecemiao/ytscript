@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from fakes import FakeTranscriber, FakeYouTubeClient, make_videos
+from fakes import FakeDriveUploader, FakeTranscriber, FakeYouTubeClient, make_videos
 from ytscript import cli
 
 
@@ -17,7 +17,9 @@ def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         "initial_backfill = 3\n"
         "check_limit = 2\n"
         'output_dir = "scripts"\n'
-        'state_file = "state.json"\n',
+        'state_file = "state.json"\n'
+        'drive_credentials_file = "creds.json"\n'
+        'drive_token_file = "drive-token.json"\n',
         encoding="utf-8",
     )
     monkeypatch.chdir(tmp_path)
@@ -148,3 +150,89 @@ def test_list_marks_members_only_videos(
     lines = capsys.readouterr().out.splitlines()
     assert lines[0].endswith("[members only]")
     assert not lines[1].endswith("[members only]")
+
+
+def test_drive_flags_override_the_config_file(project: Path) -> None:
+    parser = cli.build_parser()
+    args = parser.parse_args(
+        ["run", "--drive", "--drive-folder", "https://drive.google.com/drive/folders/1AbC"]
+    )
+    (project / "drive-credentials.json").write_text("{}", encoding="utf-8")
+    args.config = project / "ytscript.toml"
+    (project / "ytscript.toml").write_text(
+        'channel = "@testchannel"\ndrive_credentials_file = "drive-credentials.json"\n',
+        encoding="utf-8",
+    )
+    config = cli._config_from_args(args)
+    assert config.drive_upload is True
+    assert config.drive_folder_id == "https://drive.google.com/drive/folders/1AbC"
+
+    assert cli._config_from_args(parser.parse_args(["run", "--no-drive"])).drive_upload is False
+
+
+def test_run_reports_what_went_to_drive(
+    project: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    client = FakeYouTubeClient(make_videos(1))
+    real_init = cli.Pipeline.__init__
+    monkeypatch.setattr(
+        cli.Pipeline,
+        "__init__",
+        lambda self, config, client_=None, transcriber=None: real_init(
+            self,
+            config,
+            client=client,
+            transcriber=FakeTranscriber(),
+            uploader=FakeDriveUploader(),
+        ),
+    )
+    (project / "creds.json").write_text("{}", encoding="utf-8")
+    assert cli.main(["run", "--limit", "1", "--drive"]) == 0
+    out = capsys.readouterr().out
+    assert "uploaded 1 file(s) to Google Drive:" in out
+    assert "https://drive.google.com/file/d/file-1/view" in out
+
+
+def test_run_without_drive_credentials_is_a_clean_error(
+    project: Path, fake_pipeline, capsys: pytest.CaptureFixture
+) -> None:
+    (project / "ytscript.toml").write_text('channel = "@testchannel"\n', encoding="utf-8")
+    assert cli.main(["run", "--drive"]) == 1
+    assert "Google Drive uploads need credentials" in capsys.readouterr().err
+
+
+def test_run_says_to_authorise_before_the_first_upload(
+    project: Path, fake_pipeline, capsys: pytest.CaptureFixture
+) -> None:
+    (project / "creds.json").write_text("{}", encoding="utf-8")
+    assert cli.main(["run", "--drive"]) == 1
+    err = capsys.readouterr().err
+    assert "drive-auth" in err
+    assert not (project / "scripts").exists()
+
+
+def test_drive_auth_says_which_settings_are_missing(
+    project: Path, capsys: pytest.CaptureFixture
+) -> None:
+    # Configured, but the client secrets file itself is not there yet.
+    assert cli.main(["drive-auth"]) == 1
+    assert "drive_credentials_file not found" in capsys.readouterr().err
+
+    (project / "ytscript.toml").write_text('channel = "@testchannel"\n', encoding="utf-8")
+    assert cli.main(["drive-auth"]) == 1
+    assert "need credentials" in capsys.readouterr().err
+
+
+def test_drive_auth_reports_where_the_scripts_will_go(
+    project: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    (project / "creds.json").write_text("{}", encoding="utf-8")
+    uploader = FakeDriveUploader()
+    monkeypatch.setattr(cli.DriveUploader, "from_config", classmethod(lambda cls, config: uploader))
+    monkeypatch.setattr(
+        FakeDriveUploader, "authorize", lambda self: project / "token.json", raising=False
+    )
+    assert cli.main(["drive-auth"]) == 0
+    out = capsys.readouterr().out
+    assert "token is cached in" in out
+    assert "folder-id" in out

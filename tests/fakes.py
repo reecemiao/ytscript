@@ -64,3 +64,42 @@ class FakeTranscriber:
             ],
             language or self.language,
         )
+
+
+class FakeDriveUploader:
+    """Records what a run would have pushed to Drive, without any Google client."""
+
+    name = "google-drive"
+
+    def __init__(self, fail_on: set[str] | None = None, connect_error: str | None = None) -> None:
+        self.fail_on = fail_on or set()
+        self.connect_error = connect_error
+        self.connected = 0
+        self.uploaded: list[str] = []
+
+    def connect(self, interactive: bool = False) -> None:
+        self.connected += 1
+        if self.connect_error:
+            from ytscript.drive import DriveError
+
+            raise DriveError(self.connect_error)
+
+    @property
+    def folder(self) -> str | None:
+        return "folder-id"
+
+    def upload(self, path: Path):
+        from ytscript.drive import DriveError, DriveFile
+
+        path = Path(path)
+        if path.name in self.fail_on:
+            raise DriveError("drive said no")
+        self.uploaded.append(path.name)
+        return DriveFile(
+            id=f"file-{len(self.uploaded)}",
+            name=path.name,
+            link=f"https://drive.google.com/file/d/file-{len(self.uploaded)}/view",
+        )
+
+    def upload_all(self, paths: list[Path]):
+        return [self.upload(path) for path in paths]
