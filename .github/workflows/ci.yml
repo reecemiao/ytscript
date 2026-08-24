@@ -90,7 +90,7 @@ jobs:
             import: ytscript.transcribers.openai_api
           - extra: drive
             # The connector imports the client lazily, so name it too.
-            import: "ytscript.drive, googleapiclient.discovery, google_auth_oauthlib.flow"
+            import: "ytscript.drive, googleapiclient.discovery, google_auth_oauthlib.flow, google_auth_httplib2, socks"
     steps:
       - uses: actions/checkout@v5
 

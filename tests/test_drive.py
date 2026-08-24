@@ -1,13 +1,21 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
 
 from fakes import FakeDriveUploader, FakeTranscriber, FakeYouTubeClient, make_videos
 from ytscript.config import Config, ConfigError
-from ytscript.drive import DriveError, DriveFile, DriveUploader, parse_folder_id, scope_url
+from ytscript.drive import (
+    DriveError,
+    DriveFile,
+    DriveUploader,
+    parse_folder_id,
+    scope_url,
+    system_proxy,
+)
 from ytscript.pipeline import Pipeline
 from ytscript.state import State
 
@@ -308,6 +316,20 @@ class FakeService:
 
 
 @pytest.fixture()
+def no_proxy(monkeypatch: pytest.MonkeyPatch):
+    """A machine that talks to the internet directly."""
+    monkeypatch.setattr("ytscript.drive.getproxies", dict)
+    monkeypatch.setattr("ytscript.drive.proxy_bypass", lambda host: False)
+
+
+@pytest.fixture()
+def proxied(monkeypatch: pytest.MonkeyPatch):
+    """A machine with a proxy configured, the way Windows stores one."""
+    monkeypatch.setattr("ytscript.drive.getproxies", lambda: {"https": "127.0.0.1:7890"})
+    monkeypatch.setattr("ytscript.drive.proxy_bypass", lambda host: False)
+
+
+@pytest.fixture()
 def google_stubs(monkeypatch: pytest.MonkeyPatch):
     """Stand in for googleapiclient, so these run with or without the extra installed."""
     import sys
@@ -412,3 +434,75 @@ def test_an_http_error_becomes_a_drive_error(google_stubs, tmp_path: Path) -> No
     script.write_text("hello", encoding="utf-8")
     with pytest.raises(DriveError, match="insufficient permissions"):
         uploader.upload(script)
+
+
+def _unreachable_uploader(tmp_path: Path):
+    """An uploader whose every call dies the way a blocked connection does."""
+
+    class Unreachable:
+        def execute(self):
+            raise TimeoutError("[WinError 10060] the connection attempt failed")
+
+    class Silent(FakeFiles):
+        def list(self, q: str, **kwargs):
+            return Unreachable()
+
+    script = tmp_path / "a.txt"
+    script.write_text("hello", encoding="utf-8")
+    return connected(Silent(), folder_id="1AbC"), script
+
+
+def test_a_timeout_without_a_proxy_says_to_set_one(google_stubs, no_proxy, tmp_path: Path) -> None:
+    uploader, script = _unreachable_uploader(tmp_path)
+    with pytest.raises(DriveError, match="HTTPS_PROXY") as caught:
+        uploader.upload(script)
+    assert "WinError 10060" in str(caught.value)
+
+
+def test_a_timeout_behind_a_proxy_names_it(google_stubs, proxied, tmp_path: Path) -> None:
+    uploader, script = _unreachable_uploader(tmp_path)
+    with pytest.raises(DriveError, match=re.escape("through the proxy at http://127.0.0.1:7890")):
+        uploader.upload(script)
+
+
+def test_an_answer_from_google_is_left_to_speak_for_itself(
+    google_stubs, no_proxy, tmp_path: Path
+) -> None:
+    class Refused:
+        def execute(self):
+            raise google_stubs("403 insufficient permissions")
+
+    class Angry(FakeFiles):
+        def list(self, q: str, **kwargs):
+            return Refused()
+
+    uploader = connected(Angry(), folder_id="1AbC")
+    script = tmp_path / "a.txt"
+    script.write_text("hello", encoding="utf-8")
+    with pytest.raises(DriveError) as caught:
+        uploader.upload(script)
+    assert "HTTPS_PROXY" not in str(caught.value)
+
+
+def test_system_proxy_reads_what_the_rest_of_the_machine_uses(proxied) -> None:
+    # A bare "host:port" out of the Windows registry becomes a URL httplib2 can parse.
+    assert system_proxy() == "http://127.0.0.1:7890"
+
+
+def test_system_proxy_is_none_without_one(no_proxy) -> None:
+    assert system_proxy() is None
+
+
+def test_system_proxy_honours_a_bypass(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("ytscript.drive.getproxies", lambda: {"https": "http://127.0.0.1:7890"})
+    monkeypatch.setattr("ytscript.drive.proxy_bypass", lambda host: True)
+    assert system_proxy() is None
+
+
+def test_https_is_preferred_over_http(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "ytscript.drive.getproxies",
+        lambda: {"http": "http://127.0.0.1:1", "https": "http://127.0.0.1:2"},
+    )
+    monkeypatch.setattr("ytscript.drive.proxy_bypass", lambda host: False)
+    assert system_proxy() == "http://127.0.0.1:2"

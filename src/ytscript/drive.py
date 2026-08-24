@@ -13,8 +13,12 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.request import getproxies, proxy_bypass
 
 log = logging.getLogger("ytscript")
+
+# The host every call in this module goes to; only its proxy settings matter.
+API_HOST = "www.googleapis.com"
 
 # "drive.file" is per-file access: the app only ever sees what it created itself,
 # which is all an uploader needs. "drive" is the whole Drive and is what an
@@ -36,6 +40,10 @@ _INSTALL_HINT = (
 )
 
 _AUTH_HINT = "run 'ytscript drive-auth' once to authorise the upload"
+
+# Names of the client's own errors for a request that never got an answer. Everything
+# else it raises means Google replied, and the reply says more than a hint would.
+_UNREACHED = ("ServerNotFoundError", "ProxyError", "ConnectionError", "Timeout")
 
 
 class DriveError(RuntimeError):
@@ -79,6 +87,47 @@ def parse_folder_id(value: str) -> str:
         f"could not read a folder id out of drive_folder_id {value!r}; "
         "paste the id itself or the https://drive.google.com/drive/folders/... URL"
     )
+
+
+def system_proxy(host: str = API_HOST) -> str | None:
+    """The proxy the rest of the machine uses to reach ``host``, if it uses one.
+
+    ``getproxies`` reads ``HTTPS_PROXY`` and friends first, then the Windows registry
+    or the macOS network settings — the same places yt-dlp looks, and the reason
+    downloads can work while an upload times out: the Google client reads none of them.
+    """
+    try:
+        proxies = getproxies()
+        if not proxies or proxy_bypass(host):
+            return None
+    except Exception:  # pragma: no cover - proxy_bypass is platform code
+        return None
+    url = (proxies.get("https") or proxies.get("http") or "").strip()
+    if not url:
+        return None
+    # The Windows registry stores a bare "host:port", which httplib2 will not parse.
+    return url if "://" in url else f"http://{url}"
+
+
+def _unreachable_hint() -> str:
+    """What to say about a request that got no answer, given how this machine connects."""
+    proxy = system_proxy()
+    if proxy:
+        return f"the request went through the proxy at {proxy}, which could not reach {API_HOST}"
+    return (
+        f"nothing on this machine proxies {API_HOST}, so the request went direct; where "
+        "that is blocked, set HTTPS_PROXY in the environment or a system-wide proxy, "
+        "which ytscript picks up on its own"
+    )
+
+
+def _never_reached_google(exc: BaseException) -> bool:
+    """Whether the call died on the wire — a timeout, a refused connection, DNS.
+
+    ``OSError`` covers the socket errors, including the Windows ``WinError 10060``
+    timeout that a blocked or unproxied connection to googleapis.com produces.
+    """
+    return isinstance(exc, OSError) or type(exc).__name__ in _UNREACHED
 
 
 def _quote(value: str) -> str:
@@ -246,12 +295,41 @@ class DriveUploader:
             from googleapiclient.discovery import build  # noqa: PLC0415 - optional dependency
         except ImportError as exc:
             raise DriveError(_INSTALL_HINT) from exc
+        # The discovery cache wants a writable home directory and buys nothing here.
+        kwargs: dict[str, Any] = {"cache_discovery": False}
+        proxied = self._proxied_http(credentials)
+        kwargs["http" if proxied is not None else "credentials"] = proxied or credentials
         try:
-            # The discovery cache wants a writable home directory and buys nothing here.
-            self._service = build("drive", "v3", credentials=credentials, cache_discovery=False)
+            self._service = build("drive", "v3", **kwargs)
         except Exception as exc:
             raise DriveError(f"could not reach Google Drive: {exc}") from exc
         self._parent = self._resolve_folder()
+
+    def _proxied_http(self, credentials: Any) -> Any | None:
+        """An HTTP client pointed at the system proxy, or ``None`` to go direct."""
+        proxy = system_proxy()
+        if proxy is None:
+            return None
+        try:
+            import httplib2  # noqa: PLC0415 - optional dependency
+            from google_auth_httplib2 import AuthorizedHttp  # noqa: PLC0415 - optional
+        except ImportError as exc:
+            raise DriveError(_INSTALL_HINT) from exc
+        try:
+            info = httplib2.proxy_info_from_url(proxy, "https")
+        except Exception:
+            log.warning("ignoring the system proxy %s: it is not a proxy URL", proxy)
+            return None
+        if not info.isgood():
+            # httplib2 needs PySocks for any proxy at all, an HTTP one included, and
+            # without it goes straight past the setting to a connection that hangs.
+            raise DriveError(
+                f"this machine reaches the network through {proxy}, but the Google client "
+                "cannot use a proxy without PySocks installed; 'uv sync --extra drive' "
+                "brings it in"
+            )
+        log.info("reaching Google Drive through %s", proxy)
+        return AuthorizedHttp(credentials, http=httplib2.Http(proxy_info=info))
 
     @property
     def folder(self) -> str | None:
@@ -263,7 +341,8 @@ class DriveUploader:
         try:
             return request.execute()
         except Exception as exc:
-            raise DriveError(f"{what} failed: {exc}") from exc
+            hint = f"; {_unreachable_hint()}" if _never_reached_google(exc) else ""
+            raise DriveError(f"{what} failed: {exc}{hint}") from exc
 
     def _find(self, name: str, parent: str | None, mime: str | None = None) -> str | None:
         """Id of a non-trashed file of that name in that folder, if there is one."""
