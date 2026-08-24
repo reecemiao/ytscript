@@ -297,17 +297,24 @@ already on disk.
 uv sync --extra drive            # or: uv sync --extra local --extra drive
 ```
 
-Google needs to know which application is asking, which is a one-time setup in the
-[Google Cloud console]:
+`drive_credentials_file` is the OAuth client secrets JSON that identifies ytscript to
+Google. It is not a password and grants nothing on its own — signing in does that — and
+getting one is free, with no billing account. In the [Google Cloud console]:
 
-1. Create a project, then enable the **Google Drive API** for it.
-2. Under **APIs & Services → Credentials**, create an **OAuth client ID** of type
-   **Desktop app** and download its JSON.
-3. On the **OAuth consent screen**, add your own Google account as a test user — an app
-   in testing mode refuses everyone else.
+1. Create a project.
+2. **APIs & Services → Library**: enable the **Google Drive API**.
+3. **Google Auth Platform** (**APIs & Services → OAuth consent screen** in the older
+   interface): fill in the app name and your email, with user type **External**, or
+   **Internal** on a Workspace account.
+4. **Clients → Create client**, application type **Desktop app**, then **Download JSON**.
+5. **Audience → Publish app**, which saves a weekly re-authorisation; see below.
 
-Save that JSON in the checkout (`drive-credentials.json` is in `.gitignore`), point the
-setting at it, and sign in once:
+The file starts with `{"installed": {"client_id": "....apps.googleusercontent.com"`. One
+that starts with `"web"` came from the wrong application type, and one holding
+`"type": "service_account"` belongs in `drive_service_account_file` instead.
+
+Save it in the checkout (`drive-credentials.json` is in `.gitignore`), point the setting
+at it, and sign in once:
 
 ```toml
 drive_upload = true
@@ -322,8 +329,7 @@ ytscript run
 
 `drive-auth` opens the Google sign-in in a browser on the machine it runs on and writes
 the result to `drive_token_file`. Runs after that need no browser: the token refreshes
-itself, which is what makes an unattended `ytscript run` work. It is a live login to
-your Drive, so it is kept at mode 600 and is in `.gitignore`. Delete the file and run
+itself, which is what makes an unattended `ytscript run` work. Delete the file and run
 `drive-auth` again to sign in as someone else.
 
 A run reports what went up:
@@ -345,6 +351,94 @@ Sign-in happens once, before the first download, so a token that has gone stale 
 second rather than a whole backfill. If an upload itself fails, that video counts as
 failed: it is not written to the state file, and the next run transcribes and uploads it
 again.
+
+### Publishing, and the seven-day token
+
+While the app's publishing status is `Testing`, Google hands out refresh tokens that
+stop working after 7 days, so an unattended run dies a week after you authorised it.
+**Audience → Publish app** is what stops that, and it costs nothing: the default
+`drive.file` scope is not a sensitive one, so Google does not put the app through its
+verification review. Leaving it in `Testing` also means listing your own account under
+**Audience → Test users**, since a testing app refuses everyone else; once the app is
+published, that list stops mattering.
+
+Publishing does not rescue a token you already have. The 7 days are stamped on the
+refresh token when it is issued, so a sign-in from before the app was published still
+stops working a week later. Delete `drive_token_file` and run `drive-auth` again.
+
+The wider `drive` scope *is* restricted and does need the verification review before it
+can be published, which is one more reason to leave `drive_scope` alone unless an
+existing folder makes it necessary — or to use a service account, which none of this
+applies to.
+
+### When the sign-in is refused
+
+**"Access blocked: … has not completed the Google verification process"** is Google
+turning the sign-in away, before ytscript sees anything. One of three things:
+
+- The app is still in `Testing` and the account signing in is not on the test-user list.
+  Watch for a browser signed in as somebody other than the project's owner. Add the
+  address under **Audience → Test users**, or publish the app.
+- The app is published and the **Data Access** page lists a sensitive or restricted
+  scope. Production needs the verification review for those. Take the scope off that
+  page — ytscript only ever asks for the one in `drive_scope` — or go back to `Testing`.
+- A Workspace administrator blocks unverified third-party apps outright. Nothing in the
+  Cloud project changes that: on a Workspace you own, user type **Internal** sidesteps
+  verification altogether, and otherwise a service account is the way through.
+
+A **"Google hasn't verified this app"** page is the milder one and not a refusal:
+**Advanced → Go to …** carries on. It is your own app on your own project.
+
+### Behind a proxy
+
+Uploads go to `www.googleapis.com`, which is not always reachable directly. ytscript
+uses whatever proxy the rest of the machine uses — `HTTPS_PROXY` and friends first, then
+the Windows registry or the macOS network settings, the same places yt-dlp looks — so a
+setup where downloads already work needs nothing more. `ytscript -v run` says which
+proxy it picked (`-v` goes before the subcommand).
+
+Only when the machine has none configured is there anything to set:
+
+```powershell
+$env:HTTPS_PROXY = "http://127.0.0.1:7890"   # your client's HTTP port
+```
+
+A SOCKS-only client takes `socks5://127.0.0.1:1080` in the same variable. The port is
+worth reading rather than guessing; on Windows this prints the one the system uses:
+
+```
+reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings" /v ProxyServer
+```
+
+Two failures look alike from the outside and are worth telling apart. A timeout
+(`WinError 10060`) says the request went out and nothing came back; the error names the
+proxy it went through, or says it went direct. A complaint about **PySocks** means the
+proxy was ignored rather than used: httplib2, which the Google client is built on,
+silently declines to proxy anything when PySocks is missing, so a proxy setting that
+looks right does nothing at all. The `drive` extra installs it, and `uv sync --extra
+drive` is the repair.
+
+### Who this lets into your Drive
+
+Only you. Publishing is about the consent screen, not about your files: it means any
+Google account may sign in to the app, and each one that does grants access to *its own*
+Drive and gets its own token. There is no shared pool for someone else to reach yours
+through.
+
+What does reach your Drive is `drive_token_file` — that is the file to guard, which is
+why it is written mode 600 and is in `.gitignore`. Anyone holding it can act as ytscript
+on your account until you revoke it. `drive-credentials.json` is much less sensitive: a
+desktop client secret is not a real secret, since anyone can unpack a distributed app to
+find one, and on its own it opens nothing.
+
+Even the token is fenced in by the default `drive.file` scope: ytscript sees the files
+it created and nothing else, so the documents, photos and folders already in your Drive
+are outside what it can read, let alone change. The scripts it uploads are private to
+your account until you share them.
+
+To end it, remove the app under [Google Account → Data & privacy → Third-party apps &
+services][permissions]. The cached token stops working at once, and the local scripts
+stay exactly where they are.
 
 ### Where the files land
 
@@ -371,9 +465,15 @@ Changing the scope invalidates the cached sign-in — delete `drive_token_file` 
 ### Unattended, without a browser
 
 A service account signs in with a key file instead of a browser, which suits a server
-that has neither. Create one in the same Cloud project, download its JSON key, then
-share a Drive folder with the account's `...iam.gserviceaccount.com` address (Editor)
-and point ytscript at both:
+that has neither. It also walks past everything above: no consent screen, no test users,
+no verification, no `drive-auth`, and no token that expires after a week. In the same
+Cloud project:
+
+1. **IAM & Admin → Service Accounts → Create service account.**
+2. On the new account, **Keys → Add key → Create new key → JSON**, and save it as
+   `drive-service-account.json` in the checkout (it is in `.gitignore`).
+3. In Drive, make the folder the scripts should go to and **Share** it with the
+   account's `...@....iam.gserviceaccount.com` address as **Editor**.
 
 ```toml
 drive_upload = true
@@ -381,9 +481,14 @@ drive_service_account_file = "drive-service-account.json"
 drive_folder_id = "1AbC..."      # the folder shared with the service account
 ```
 
-`drive_folder_id` is required here: a service account has no Drive of its own to write
-to, and ytscript refuses the combination up front rather than failing on the first
-upload. Set `drive_credentials_file` or `drive_service_account_file`, not both.
+`ytscript run` then uploads with no further setup. `drive_folder_id` is required here: a
+service account has no Drive of its own to write to, and ytscript refuses the
+combination up front rather than failing on the first upload. Set
+`drive_credentials_file` or `drive_service_account_file`, not both.
+
+The tradeoff is ownership — the uploaded files belong to the service account, and you
+see them through the shared folder. Signing in as yourself with `drive-auth` is the way
+to own them outright.
 
 ## Running it on a schedule
 
@@ -465,6 +570,7 @@ demand from the Actions tab:
   `ytscript --help`
 
 [Google Cloud console]: https://console.cloud.google.com/
+[permissions]: https://myaccount.google.com/permissions
 [uv]: https://docs.astral.sh/uv/
 [ruff]: https://docs.astral.sh/ruff/
 [faster-whisper]: https://github.com/SYSTRAN/faster-whisper
