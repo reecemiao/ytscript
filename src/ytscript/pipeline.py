@@ -12,8 +12,10 @@ from .config import Config
 from .drive import DriveError, DriveFile, DriveUploader
 from .formatting import write_outputs
 from .models import RunReport, Transcript, Video
+from .polish import polish_segments
 from .state import State
 from .transcribers import Transcriber, TranscriptionError, build_transcriber
+from .vocabulary import load_vocabulary, seed_prompt
 from .youtube import YouTubeClient, YouTubeError
 
 log = logging.getLogger("ytscript")
@@ -57,6 +59,14 @@ class Pipeline:
         )
         self._transcriber = transcriber
         self._uploader = uploader
+        self.vocabulary = load_vocabulary(config.vocabulary)
+        # An unset prompt means "the stock sentence for this language"; an empty
+        # one means the caller wants no seed at all.
+        self.seed = (
+            seed_prompt(config.language)
+            if config.whisper_initial_prompt is None
+            else config.whisper_initial_prompt
+        )
 
     @property
     def transcriber(self) -> Transcriber:
@@ -71,6 +81,11 @@ class Pipeline:
         if self._uploader is None:
             self._uploader = DriveUploader.from_config(self.config)
         return self._uploader
+
+    def prompt_for(self, video: Video) -> str | None:
+        """The priming text this video is transcribed with."""
+        subject = video if self.config.prompt_from_metadata else None
+        return self.vocabulary.prompt(subject, seed=self.seed)
 
     def list_videos(self, limit: int | None = None) -> list[Video]:
         count = limit if limit is not None else self.config.check_limit
@@ -140,9 +155,21 @@ class Pipeline:
         config = self.config
         audio_path, video = self.client.download_audio(video, audio_dir)
         try:
-            segments, language = self.transcriber.transcribe(audio_path, config.language)
+            segments, language = self.transcriber.transcribe(
+                audio_path, config.language, prompt=self.prompt_for(video)
+            )
             if not segments:
                 raise TranscriptionError("no speech was recognised in the audio")
+            if config.polish or config.convert_to_simplified:
+                segments = polish_segments(
+                    segments,
+                    vocabulary=self.vocabulary if config.polish else None,
+                    punctuation=config.polish,
+                    simplified=config.convert_to_simplified,
+                    loops=config.polish,
+                )
+            if not segments:
+                raise TranscriptionError("every recognised segment was dropped as boilerplate")
             transcript = Transcript(
                 video=video,
                 segments=segments,

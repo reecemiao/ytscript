@@ -46,24 +46,30 @@ class FakeYouTubeClient:
 class FakeTranscriber:
     name = "fake"
 
-    def __init__(self, language: str | None = "en", fail_on: set[str] | None = None) -> None:
+    def __init__(
+        self,
+        language: str | None = "en",
+        fail_on: set[str] | None = None,
+        segments: list[Segment] | None = None,
+    ) -> None:
         self.language = language
         self.fail_on = fail_on or set()
+        self.segments = segments
         self.calls: list[tuple[Path, str | None]] = []
+        self.prompts: list[str | None] = []
 
-    def transcribe(self, audio_path: Path, language: str | None = None):
+    def transcribe(self, audio_path: Path, language: str | None = None, prompt: str | None = None):
         self.calls.append((audio_path, language))
+        self.prompts.append(prompt)
         if audio_path.stem in self.fail_on:
             from ytscript.transcribers import TranscriptionError
 
             raise TranscriptionError("backend exploded")
-        return (
-            [
-                Segment(0.0, 2.0, "Hello there."),
-                Segment(6.0, 8.0, "Second paragraph starts here."),
-            ],
-            language or self.language,
-        )
+        segments = self.segments or [
+            Segment(0.0, 2.0, "Hello there."),
+            Segment(6.0, 8.0, "Second paragraph starts here."),
+        ]
+        return list(segments), language or self.language
 
 
 class FakeDriveUploader:

@@ -19,6 +19,9 @@ dependencies = [
 local = ["faster-whisper>=1.1.0"]
 # Hosted speech-to-text via the OpenAI audio transcription endpoint.
 openai = ["openai>=1.30.0"]
+# Traditional -> simplified conversion, for `convert_to_simplified`. Pure Python,
+# and independent of which speech-to-text backend is in use.
+zh = ["opencc-python-reimplemented>=0.1.7"]
 # Copy the finished scripts into Google Drive. Independent of the two backends.
 # PySocks is not optional in practice: without it httplib2, which the Google client
 # is built on, quietly ignores every proxy setting instead of using one.

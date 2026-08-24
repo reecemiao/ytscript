@@ -25,10 +25,12 @@ def build_transcriber(config: Config) -> Transcriber:
             compute_type=config.whisper_compute_type,
             initial_prompt=config.whisper_initial_prompt,
             batch_size=config.whisper_batch_size,
+            condition_on_previous_text=config.whisper_condition_on_previous_text,
         )
     if config.backend == "openai":
         return OpenAITranscriber(
             model=config.openai_model,
             api_key_env=config.openai_api_key_env,
+            initial_prompt=config.whisper_initial_prompt,
         )
     raise TranscriptionError(f"unknown backend {config.backend!r}")

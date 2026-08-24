@@ -11,6 +11,8 @@ from .config import SAMPLE_CONFIG, Config, ConfigError, load_config
 from .drive import DriveError, DriveUploader
 from .models import RunReport
 from .pipeline import Pipeline
+from .polish import polish_text
+from .vocabulary import VocabularyError, load_vocabulary
 from .youtube import YouTubeError
 
 log = logging.getLogger("ytscript")
@@ -76,6 +78,10 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         help="clips decoded at once; 1 turns batching off",
     )
+    run.add_argument(
+        "--vocabulary",
+        help="terms and rewrites for this channel: a built-in name or a file path",
+    )
     run.add_argument("--output-dir", dest="output_dir", type=Path)
     run.add_argument(
         "--format",
@@ -112,6 +118,31 @@ def build_parser() -> argparse.ArgumentParser:
         help="show what would be transcribed without downloading anything",
     )
 
+    polish = sub.add_parser(
+        "polish",
+        help="re-apply the vocabulary and punctuation clean-up to scripts already written",
+    )
+    polish.add_argument(
+        "paths",
+        nargs="+",
+        type=Path,
+        metavar="PATH",
+        help="script files, or directories to take the .txt and .md files from",
+    )
+    polish.add_argument("--vocabulary", help="a built-in name or a file path")
+    polish.add_argument(
+        "--simplified",
+        dest="convert_to_simplified",
+        action="store_true",
+        default=None,
+        help="also rewrite traditional characters as simplified",
+    )
+    polish.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="list the files that would change without writing them",
+    )
+
     listing = sub.add_parser("list", help="show the newest videos on the channel")
     add_common(listing)
     listing.add_argument("--limit", type=int, default=10)
@@ -134,6 +165,7 @@ _OVERRIDE_FIELDS = (
     "backend",
     "whisper_model",
     "whisper_batch_size",
+    "vocabulary",
     "output_dir",
     "output_formats",
     "timestamps",
@@ -211,6 +243,56 @@ def cmd_list(args: argparse.Namespace) -> int:
     return 0
 
 
+SCRIPT_SUFFIXES = (".txt", ".md")
+
+
+def _script_paths(paths: list[Path]) -> list[Path]:
+    """Expand the arguments into the script files to rewrite."""
+    found: list[Path] = []
+    for path in paths:
+        if path.is_dir():
+            found.extend(
+                sorted(child for child in path.iterdir() if child.suffix in SCRIPT_SUFFIXES)
+            )
+        elif path.is_file():
+            found.append(path)
+        else:
+            raise ConfigError(f"no such file or directory: {path}")
+    return found
+
+
+def cmd_polish(args: argparse.Namespace) -> int:
+    # No channel is needed to rewrite files that already exist.
+    config = load_config(path=args.config)
+    name = args.vocabulary if args.vocabulary is not None else config.vocabulary
+    vocabulary = load_vocabulary(name)
+    simplified = (
+        config.convert_to_simplified
+        if args.convert_to_simplified is None
+        else args.convert_to_simplified
+    )
+    paths = _script_paths(args.paths)
+    if not paths:
+        print("no .txt or .md scripts found")
+        return 0
+
+    changed = []
+    for path in paths:
+        original = path.read_text(encoding="utf-8")
+        updated = polish_text(original, vocabulary, simplified=simplified)
+        if updated == original:
+            continue
+        changed.append(path)
+        if not args.dry_run:
+            path.write_text(updated, encoding="utf-8")
+
+    verb = "would rewrite" if args.dry_run else "rewrote"
+    print(f"{verb} {len(changed)} of {len(paths)} file(s)")
+    for path in changed:
+        print(f"  {path}")
+    return 0
+
+
 def cmd_drive_auth(args: argparse.Namespace) -> int:
     # No channel is needed to authorise, so this skips the usual validation.
     config = load_config(path=args.config)
@@ -251,12 +333,13 @@ def main(argv: list[str] | None = None) -> int:
     handlers = {
         "run": cmd_run,
         "list": cmd_list,
+        "polish": cmd_polish,
         "init": cmd_init,
         "drive-auth": cmd_drive_auth,
     }
     try:
         return handlers[args.command](args)
-    except (ConfigError, YouTubeError, DriveError) as exc:
+    except (ConfigError, VocabularyError, YouTubeError, DriveError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
     except KeyboardInterrupt:  # pragma: no cover

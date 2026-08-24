@@ -1,0 +1,157 @@
+# Vocabulary for a Mandarin US-market commentary channel.
+#
+# Two kinds of line:
+#   term              seeds Whisper's prompt so it expects the word
+#   wrong => right    also rewrites the word when it comes out mangled
+#
+# Both sides of a "=>" line are seeded, so a correction doubles as a term.
+# Rewrites are literal. An ASCII left-hand side only matches as a whole word,
+# so "CDS" never fires inside "CDSX". Order matters: the prompt is capped at
+# a couple of hundred characters, and the file is read top down.
+#
+# Copy this file, edit it, and point `vocabulary` at your copy — the errors a
+# model makes follow the speaker, so this list is worth growing as you read.
+
+# --- terms this channel says every episode ---------------------------------
+美股
+标普500
+纳斯达克
+费城半导体
+对中基金 => 对冲基金
+共同基金
+散户
+机构
+
+# --- terms Whisper reliably gets wrong on this channel ----------------------
+# 费半 is the channel's shorthand for the Philadelphia semiconductor index.
+飞班 => 费半
+肺瓣 => 费半
+非诚半导体 => 费城半导体
+自然负债表 => 资产负债表
+美股收益 => 每股收益
+非GNAP => 非GAAP
+阿斯曼 => 阿斯麦
+极客讯霍尔 => 杰克逊霍尔
+杰克森霍尔 => 杰克逊霍尔
+自然力的推演 => 时间的推演
+S&DK => SNDK
+CTS => CDS
+ISIG => ISRG
+
+# --- tickers ---------------------------------------------------------------
+NVDA
+AVGO
+TSLA
+MSFT
+GOOG
+AMZN
+META
+AAPL
+AMD
+TSM
+ASML
+MU
+SNDK
+NFLX
+ISRG
+ORCL
+PLTR
+CRM
+INTU
+ADBE
+APP
+NOW
+IBM
+INTC
+QCOM
+MRVL
+LRCX
+AMAT
+UNH
+LLY
+COST
+WMT
+HD
+BA
+AXP
+BRK
+CRWD
+PANW
+DDOG
+NET
+UBER
+SHOP
+SNOW
+RKLB
+CRWV
+NBIS
+TER
+GLW
+TXN
+
+# --- indices and funds ------------------------------------------------------
+SPY
+QQQ
+SOXX
+SMH
+IGV
+XLK
+XLB
+XLY
+VIX
+ETF
+CTA
+
+# --- company names as they are said in Mandarin -----------------------------
+英伟达
+博通
+特斯拉
+微软
+谷歌
+亚马逊
+苹果
+台积电
+阿斯麦
+美光
+甲骨文
+英特尔
+高通
+奈飞
+达芬奇手术系统
+
+# --- the jargon of the show --------------------------------------------------
+每股收益
+资产负债表
+自由现金流
+资本支出
+前瞻估值
+毛利率
+净利润
+财报
+期权
+顶背离
+轧空
+杠杆
+去杠杆
+踩踏
+回撤
+均线
+支撑
+压力位
+仓位
+加仓
+减仓
+建仓
+美联储
+国债收益率
+财政部
+回购
+解禁
+信用违约互换
+CDS
+RSI
+EPS
+GAAP
+PMI
+13F
+杰克逊霍尔

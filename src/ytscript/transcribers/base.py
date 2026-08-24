@@ -19,7 +19,11 @@ class Transcriber(Protocol):
     name: str
 
     def transcribe(
-        self, audio_path: Path, language: str | None = None
+        self, audio_path: Path, language: str | None = None, prompt: str | None = None
     ) -> tuple[list[Segment], str | None]:
-        """Return the segments and the language that was used or detected."""
+        """Return the segments and the language that was used or detected.
+
+        ``prompt`` primes the model with words to expect — the video's title and
+        the channel's vocabulary — and overrides whatever the backend was built with.
+        """
         ...
