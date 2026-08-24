@@ -122,6 +122,115 @@ def test_failed_video_is_retried_on_the_next_run(tmp_path: Path) -> None:
     assert len(report.written) == 1
 
 
+def test_a_failure_is_written_to_the_state_file(tmp_path: Path) -> None:
+    client = FakeYouTubeClient(make_videos(2))
+    transcriber = FakeTranscriber(fail_on={"vid001"})
+    config = make_config(tmp_path, initial_backfill=2)
+    Pipeline(config, client=client, transcriber=transcriber).run()
+
+    entry = State.load(tmp_path / "state.json").failures["vid001"]
+    assert entry["attempts"] == 1
+    assert entry["title"] == "Episode 1"
+    assert entry["url"].endswith("vid001")
+    assert "backend exploded" in entry["error"]
+
+
+def test_retry_failed_picks_up_a_video_outside_the_window(tmp_path: Path) -> None:
+    videos = make_videos(6)
+    client = FakeYouTubeClient(videos)
+    config = make_config(tmp_path, initial_backfill=6, check_limit=2)
+    Pipeline(config, client=client, transcriber=FakeTranscriber(fail_on={"vid005"})).run()
+
+    # vid005 is the oldest, so a later run's two-video window no longer covers it.
+    healthy = FakeTranscriber()
+    plain = Pipeline(config, client=client, transcriber=healthy).run()
+    assert plain.written == [] and plain.retried == []
+
+    report = Pipeline(config, client=client, transcriber=healthy).run(retry_failed=True)
+    assert report.retried == ["vid005"]
+    assert len(report.written) == 1
+    state = State.load(tmp_path / "state.json")
+    assert state.seen("vid005") and state.failures == {}
+
+
+def test_retry_failed_can_be_turned_on_in_the_config(tmp_path: Path) -> None:
+    client = FakeYouTubeClient(make_videos(3))
+    config = make_config(tmp_path, initial_backfill=3, check_limit=1, retry_failed=True)
+    Pipeline(config, client=client, transcriber=FakeTranscriber(fail_on={"vid002"})).run()
+
+    report = Pipeline(config, client=client, transcriber=FakeTranscriber()).run()
+    assert report.retried == ["vid002"]
+
+
+def test_a_failure_inside_the_window_is_not_queued_twice(tmp_path: Path) -> None:
+    client = FakeYouTubeClient(make_videos(2))
+    config = make_config(tmp_path, initial_backfill=2, check_limit=2, retry_failed=True)
+    Pipeline(config, client=client, transcriber=FakeTranscriber(fail_on={"vid001"})).run()
+
+    healthy = FakeTranscriber()
+    report = Pipeline(config, client=client, transcriber=healthy).run()
+    assert report.retried == []
+    assert [call[0].stem for call in healthy.calls] == ["vid001"]
+
+
+def test_a_video_is_left_alone_after_retry_max_attempts(tmp_path: Path) -> None:
+    client = FakeYouTubeClient(make_videos(3))
+    config = make_config(
+        tmp_path, initial_backfill=3, check_limit=1, retry_failed=True, retry_max_attempts=2
+    )
+    broken = FakeTranscriber(fail_on={"vid002"})
+    for _ in range(2):
+        Pipeline(config, client=client, transcriber=broken).run()
+    assert State.load(tmp_path / "state.json").attempts("vid002") == 2
+
+    report = Pipeline(config, client=client, transcriber=broken).run()
+    assert report.retried == [] and report.given_up == ["vid002"]
+
+    # An explicit --only-failed run overrules the cap.
+    forced = Pipeline(config, client=client, transcriber=broken).run(only_failed=True)
+    assert forced.retried == ["vid002"]
+
+
+def test_only_failed_never_lists_the_channel(tmp_path: Path) -> None:
+    client = FakeYouTubeClient(make_videos(2))
+    config = make_config(tmp_path, initial_backfill=2)
+    Pipeline(config, client=client, transcriber=FakeTranscriber(fail_on={"vid001"})).run()
+    listings = len(client.listed)
+
+    healthy = FakeTranscriber()
+    report = Pipeline(config, client=client, transcriber=healthy).run(only_failed=True)
+    assert len(client.listed) == listings
+    assert report.checked == 1 and report.retried == ["vid001"]
+    assert [call[0].stem for call in healthy.calls] == ["vid001"]
+
+
+def test_only_failed_with_nothing_on_the_list_does_nothing(tmp_path: Path) -> None:
+    pipeline, client, transcriber = build(tmp_path, make_videos(2))
+    report = pipeline.run(only_failed=True)
+    assert client.listed == [] and transcriber.calls == []
+    assert report.checked == 0 and report.written == []
+
+
+def test_a_retried_members_only_video_is_still_passed_over(tmp_path: Path) -> None:
+    videos = _with_members_only(make_videos(2), 1)
+    config = make_config(
+        tmp_path,
+        initial_backfill=2,
+        include_members_only=True,
+        cookies_file=tmp_path / "cookies.txt",
+    )
+    client = FakeYouTubeClient(videos)
+    Pipeline(config, client=client, transcriber=FakeTranscriber(fail_on={"vid001"})).run()
+    assert State.load(tmp_path / "state.json").failures["vid001"]["members_only"] is True
+
+    # The membership lapses: the failure is on record but must not be downloaded again.
+    signed_out = make_config(tmp_path, initial_backfill=2, retry_failed=True)
+    report = Pipeline(signed_out, client=client, transcriber=FakeTranscriber()).run(
+        only_failed=True
+    )
+    assert report.retried == [] and report.members_only == ["vid001"]
+
+
 def test_dry_run_downloads_nothing(tmp_path: Path) -> None:
     pipeline, client, transcriber = build(tmp_path, make_videos(2), initial_backfill=2)
     report = pipeline.run(dry_run=True)

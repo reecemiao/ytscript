@@ -80,12 +80,18 @@ ytscript run                     # first run: the latest 30 videos
 ytscript run                     # later runs: only what is new
 
 ytscript polish scripts          # re-clean scripts already written
+
+ytscript failures                # what an earlier run could not finish
+ytscript run --only-failed       # take another run at exactly those
 ```
 
 Scripts land in `output_dir` as `2024-05-01_Video-title_VIDEOID.txt`, and every finished
 video is recorded in the state file, so re-running is cheap and safe. State is written
 after each video, so an interrupted backfill resumes where it stopped. A video that
-fails is not recorded and is retried on the next run.
+fails is not recorded as done — it goes on the state file's failure list instead, so
+`ytscript failures` can show it and `--retry-failed` can pick it back up long after it
+has scrolled out of the `check_limit` window. See [When a download
+drops](#when-a-download-drops).
 
 Useful flags on `run`:
 
@@ -100,6 +106,9 @@ Useful flags on `run`:
 | `--format txt,md,json` | Write more than one rendering |
 | `--timestamps` | Prefix each paragraph with `[hh:mm:ss]` |
 | `--dry-run` | List what is missing without downloading anything |
+| `--retry-failed` | Also re-attempt videos an earlier run could not finish |
+| `--only-failed` | Do just those, skipping the channel listing and the attempt limit |
+| `--retries N` | Extra attempts a download gets when the connection drops (default 3) |
 | `--keep-audio` | Keep the downloaded audio next to the scripts |
 | `--drive` / `--no-drive` | Also copy each script into Google Drive, or not |
 | `--drive-folder ID` | The Drive folder they go into |
@@ -109,6 +118,10 @@ Useful flags on `run`:
 | `--cookies-from-browser firefox` | Read those cookies straight out of a browser |
 
 The cookie and members-only flags work on `list` too.
+
+`ytscript failures` prints the failure list — id, attempts, when, title and the error —
+and `ytscript failures --clear [ID ...]` forgets entries, which also resets their
+attempt count.
 
 `ytscript polish` runs the same clean-up a run does over scripts that already exist —
 useful after adding a term to the vocabulary, or on a backlog transcribed before it had
@@ -127,6 +140,12 @@ language = "zh"              # main spoken language, ISO 639-1; "auto" to detect
 
 initial_backfill = 30        # videos transcribed on the very first run
 check_limit = 5              # videos inspected on later runs
+
+download_retries = 3         # extra attempts when the connection drops; 0 means one try
+retry_backoff = 5.0          # seconds before the second attempt, doubling after that
+socket_timeout = 30.0        # seconds a stalled connection gets before it counts as failed
+retry_failed = false         # every run also re-attempts what the failure list holds
+retry_max_attempts = 3       # times a failed video is picked up again before it is left alone
 
 backend = "faster-whisper"   # or "openai"
 whisper_model = "large-v3"   # tiny | base | small | medium | large-v3 | distil-large-v3
@@ -167,6 +186,62 @@ include_members_only = false          # true also transcribes members-only video
 
 Every key has a matching environment variable: `YTSCRIPT_CHANNEL`,
 `YTSCRIPT_LANGUAGE`, `YTSCRIPT_BACKEND`, and so on.
+
+### When a download drops
+
+YouTube hangs up part-way through a download often enough that a backfill of thirty
+videos rarely gets through untouched:
+
+```
+[download]  63.2% of 48.19MiB at 1.02MiB/s ETA 00:17
+[download] Got error: ('Connection aborted.', ConnectionResetError(10054,
+'远程主机强迫关闭了一个现有的连接。', None, 10054, None))
+```
+
+That is the network, not the video — the same URL usually works seconds later. ytscript
+handles it in two places.
+
+**During the run.** A request that fails on something that looks like network trouble is
+made again, waiting `retry_backoff` seconds, then twice that, then twice that again, for
+`download_retries` extra attempts. yt-dlp resumes from the `.part` file it already has,
+so a drop at 63% costs the pause, not the 63%. Refusals are told apart from drops and
+are not retried: a members-only video or a deleted one fails immediately, as it should.
+`--retries 6` widens it for a bad line, `--retries 0` turns it off.
+
+**Between runs.** A video that still fails — its retries used up, the backend out of
+memory, Drive refusing the upload — is written to the state file under `failures`, with
+the error, the attempt count and enough about the video to fetch it again:
+
+```bash
+ytscript failures
+# 1 video(s) failed; 'ytscript run --retry-failed' tries them again:
+#   dQw4w9WgXcQ  2 attempt(s)  2024-05-02T09:14:31+00:00  Market wrap, May 1
+#       could not download audio for dQw4w9WgXcQ: ('Connection aborted.', ...)
+```
+
+This matters for a backfill. A plain run only looks at the newest `check_limit` videos,
+so a video that failed while thirty were being transcribed is out of the window by the
+next run and would never be seen again. `--retry-failed` puts the failure list back in
+front of the queue whatever its age, and `--only-failed` does those and nothing else,
+skipping the channel listing entirely:
+
+```bash
+ytscript run --retry-failed      # the newest few, plus everything that failed before
+ytscript run --only-failed       # just the failures, no listing
+```
+
+Set `retry_failed = true` to make every run do it. A video that keeps failing is picked
+up `retry_max_attempts` times and then left alone, so a genuinely broken one does not
+cost a download on every run:
+
+```
+left 1 failed video(s) alone after retry_max_attempts; 'ytscript run --only-failed'
+tries them anyway
+```
+
+`--only-failed` ignores that limit — it is an explicit request — and `ytscript failures
+--clear [ID ...]` forgets entries entirely, resetting their counts. A video that
+succeeds drops off the list by itself.
 
 ### Members-only videos
 
@@ -583,7 +658,9 @@ print(report.written)
 
 `Pipeline` takes an optional `client` and `transcriber`, so a different source or
 speech-to-text engine only has to match the small protocol in
-`ytscript/transcribers/base.py`.
+`ytscript/transcribers/base.py`. `run()` takes the retry switches too —
+`run(retry_failed=True)` and `run(only_failed=True)` — and the report it returns carries
+`failed`, `retried` and `given_up` alongside `written`.
 
 ## Development
 

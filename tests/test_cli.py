@@ -7,6 +7,7 @@ import pytest
 
 from fakes import FakeDriveUploader, FakeTranscriber, FakeYouTubeClient, make_videos
 from ytscript import cli
+from ytscript.state import State
 
 
 @pytest.fixture()
@@ -267,3 +268,79 @@ def test_polish_says_when_a_path_is_missing(project: Path, capsys: pytest.Captur
 def test_an_unknown_vocabulary_stops_the_run(project: Path, capsys: pytest.CaptureFixture) -> None:
     assert cli.main(["run", "--vocabulary", "nope"]) == 1
     assert "no vocabulary 'nope'" in capsys.readouterr().err
+
+
+def _seed_failure(project: Path, video_id: str = "vid007") -> None:
+    state = State.load(project / "state.json")
+    state.record_failure(
+        video_id,
+        "could not download audio: ('Connection aborted.', ConnectionResetError(10054, ...))",
+        title=f"Episode {video_id[-1]}",
+        url=f"https://www.youtube.com/watch?v={video_id}",
+    )
+    state.save()
+
+
+def test_run_only_failed_retries_what_the_state_file_recorded(
+    project: Path, fake_pipeline, capsys: pytest.CaptureFixture
+) -> None:
+    _seed_failure(project)
+    assert cli.main(["run", "--only-failed"]) == 0
+
+    out = capsys.readouterr().out
+    assert "picked 1 video(s) back up from the failure list" in out
+    # Nothing was listed: the retry works straight off the state file.
+    assert fake_pipeline.listed == [] and fake_pipeline.downloaded == ["vid007"]
+    assert State.load(project / "state.json").failures == {}
+
+
+def test_run_retry_failed_flag_adds_them_to_the_usual_window(
+    project: Path, fake_pipeline, capsys: pytest.CaptureFixture
+) -> None:
+    _seed_failure(project)
+    assert cli.main(["run", "--retry-failed"]) == 0
+    assert fake_pipeline.listed == [("@testchannel", 3)]
+    assert "vid007" in fake_pipeline.downloaded
+
+    _seed_failure(project)
+    assert cli.main(["run", "--no-retry-failed"]) == 0
+    assert State.load(project / "state.json").failures  # left where it was
+
+
+def test_failures_lists_and_clears_the_record(project: Path, capsys: pytest.CaptureFixture) -> None:
+    assert cli.main(["failures"]) == 0
+    assert "no failures on record" in capsys.readouterr().out
+
+    _seed_failure(project)
+    assert cli.main(["failures"]) == 0
+    out = capsys.readouterr().out
+    assert "vid007" in out and "1 attempt(s)" in out and "Connection aborted" in out
+
+    assert cli.main(["failures", "--clear"]) == 0
+    assert "forgot 1 failure(s)" in capsys.readouterr().out
+    assert State.load(project / "state.json").failures == {}
+
+
+def test_failures_clear_takes_specific_ids(project: Path, capsys: pytest.CaptureFixture) -> None:
+    _seed_failure(project, "vid007")
+    _seed_failure(project, "vid008")
+    assert cli.main(["failures", "--clear", "vid007"]) == 0
+    assert list(State.load(project / "state.json").failures) == ["vid008"]
+
+
+def test_a_failed_run_points_at_the_retry_flag(
+    project: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    client = FakeYouTubeClient(make_videos(2))
+    real_init = cli.Pipeline.__init__
+    monkeypatch.setattr(
+        cli.Pipeline,
+        "__init__",
+        lambda self, config, client_=None, transcriber=None: real_init(
+            self, config, client=client, transcriber=FakeTranscriber(fail_on={"vid001"})
+        ),
+    )
+    assert cli.main(["run"]) == 1
+    err = capsys.readouterr().err
+    assert "failed: vid001" in err
+    assert "--retry-failed" in err

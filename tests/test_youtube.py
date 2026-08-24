@@ -13,7 +13,15 @@ from ytscript.youtube import (
     _mentions_membership,
     _to_video,
     channel_uploads_url,
+    is_transient,
     parse_browser_spec,
+)
+
+# What yt-dlp prints when YouTube drops the connection part-way through, here on a
+# Chinese Windows: "the remote host forcibly closed an existing connection".
+CONNECTION_RESET = (
+    "[download] Got error: ('Connection aborted.', "
+    "ConnectionResetError(10054, '远程主机强迫关闭了一个现有的连接。', None, 10054, None))"
 )
 
 
@@ -112,3 +120,104 @@ def test_members_only_download_without_cookies_says_what_is_missing(tmp_path: Pa
     video = Video(id="x", title="T", url="https://y/watch?v=x", members_only=True)
     with pytest.raises(YouTubeError, match="members-only"):
         YouTubeClient().download_audio(video, tmp_path)
+
+
+def test_a_dropped_connection_counts_as_transient() -> None:
+    assert is_transient(RuntimeError(CONNECTION_RESET))
+    assert is_transient(ConnectionResetError(10054, "远程主机强迫关闭了一个现有的连接。"))
+    assert is_transient(TimeoutError("The read operation timed out"))
+    assert is_transient(OSError("HTTP Error 503: Service Unavailable"))
+
+
+def test_a_refusal_is_not_transient() -> None:
+    assert not is_transient(RuntimeError("Video unavailable"))
+    assert not is_transient(RuntimeError("Join this channel to get access to members-only content"))
+
+
+def test_transient_causes_are_seen_through_the_wrapper() -> None:
+    try:
+        try:
+            raise ConnectionResetError(10054, "closed")
+        except ConnectionResetError as reset:
+            raise RuntimeError("could not download audio for x") from reset
+    except RuntimeError as exc:
+        assert is_transient(exc)
+
+
+def test_a_dropped_download_is_tried_again(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    video = Video(id="x", title="T", url="https://y/watch?v=x")
+    waits: list[float] = []
+    client = YouTubeClient(retries=2, retry_backoff=1.0, sleep=waits.append)
+    attempts: list[str] = []
+
+    def flaky(video: Video, dest_dir: Path) -> tuple[Path, Video]:
+        attempts.append(video.id)
+        if len(attempts) < 3:
+            raise YouTubeError(
+                f"could not download audio for x: {CONNECTION_RESET}", transient=True
+            )
+        return dest_dir / "x.m4a", video
+
+    monkeypatch.setattr(client, "_download_audio_once", flaky)
+    path, got = client.download_audio(video, tmp_path)
+
+    assert path == tmp_path / "x.m4a" and got is video
+    assert len(attempts) == 3
+    # The pause widens, so a blip costs a second and an outage is not hammered.
+    assert waits == [1.0, 2.0]
+
+
+def test_retries_run_out_and_the_last_error_is_raised(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    video = Video(id="x", title="T", url="https://y/watch?v=x")
+    attempts: list[str] = []
+    client = YouTubeClient(retries=1, retry_backoff=0.0, sleep=lambda _: None)
+
+    def always_drops(video: Video, dest_dir: Path) -> tuple[Path, Video]:
+        attempts.append(video.id)
+        raise YouTubeError("could not download audio for x: connection reset", transient=True)
+
+    monkeypatch.setattr(client, "_download_audio_once", always_drops)
+    with pytest.raises(YouTubeError, match="connection reset"):
+        client.download_audio(video, tmp_path)
+    assert len(attempts) == 2
+
+
+def test_a_refused_download_is_not_tried_again(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    video = Video(id="x", title="T", url="https://y/watch?v=x")
+    attempts: list[str] = []
+    client = YouTubeClient(retries=3, retry_backoff=0.0, sleep=lambda _: None)
+
+    def refused(video: Video, dest_dir: Path) -> tuple[Path, Video]:
+        attempts.append(video.id)
+        raise YouTubeError("x is members-only; sign in as a member")
+
+    monkeypatch.setattr(client, "_download_audio_once", refused)
+    with pytest.raises(YouTubeError, match="members-only"):
+        client.download_audio(video, tmp_path)
+    assert len(attempts) == 1
+
+
+def test_a_dropped_listing_is_tried_again(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = YouTubeClient(retries=1, retry_backoff=0.0, sleep=lambda _: None)
+    attempts: list[int] = []
+
+    def flaky(channel: str, limit: int) -> list[Video]:
+        attempts.append(limit)
+        if len(attempts) == 1:
+            raise YouTubeError("could not list videos: connection aborted", transient=True)
+        return [Video(id="a", title="A", url="https://y/watch?v=a")]
+
+    monkeypatch.setattr(client, "_list_videos_once", flaky)
+    assert [video.id for video in client.latest_videos("@chan", 5)] == ["a"]
+    assert attempts == [5, 5]
+
+
+def test_retry_settings_reach_yt_dlp() -> None:
+    opts = YouTubeClient(retries=7, socket_timeout=12.0)._base_opts()
+    assert opts["retries"] == 7 and opts["fragment_retries"] == 7
+    assert opts["socket_timeout"] == 12.0
+    assert opts["continuedl"] is True
