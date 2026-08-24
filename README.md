@@ -297,16 +297,33 @@ already on disk.
 uv sync --extra drive            # or: uv sync --extra local --extra drive
 ```
 
-Google needs to know which application is asking, which is a one-time setup in the
-[Google Cloud console]:
+`drive_credentials_file` is the OAuth client secrets JSON that identifies ytscript to
+Google. It is not a password and grants nothing on its own — signing in does that — and
+getting one is free, with no billing account. In the [Google Cloud console]:
 
-1. Create a project, then enable the **Google Drive API** for it.
-2. Under **APIs & Services → Credentials**, create an **OAuth client ID** of type
-   **Desktop app** and download its JSON.
-3. On the **OAuth consent screen**, add your own Google account as a test user — an app
-   in testing mode refuses everyone else.
+1. Create a project.
+2. **APIs & Services → Library**: enable the **Google Drive API**.
+3. **Google Auth Platform** (**APIs & Services → OAuth consent screen** in the older
+   interface): fill in the app name and your email, with user type **External**, or
+   **Internal** on a Workspace account.
+4. **Clients → Create client**, application type **Desktop app**, then **Download JSON**.
+5. **Audience → Publish app**. Worth doing now; see below.
 
-Save that JSON in the checkout (`drive-credentials.json` is in `.gitignore`), point the
+The file starts with `{"installed": {"client_id": "....apps.googleusercontent.com"`. One
+that starts with `"web"` came from the wrong application type, and one holding
+`"type": "service_account"` belongs in `drive_service_account_file` instead.
+
+**Publish the app, or the token expires every week.** While the publishing status is
+`Testing`, Google hands out refresh tokens that stop working after 7 days, so an
+unattended run dies a week after you authorised it. Publishing costs nothing and is
+instant: the default `drive.file` scope is not a sensitive one, so Google does not put
+the app through its verification review. Leaving it in `Testing` also means adding your
+own account under **Audience → Test users**, since a testing app refuses everyone else.
+The wider `drive` scope *is* restricted and does need that review before it can be
+published, which is one more reason to leave `drive_scope` alone unless an existing
+folder makes it necessary — or to use a service account, which none of this applies to.
+
+Save the JSON in the checkout (`drive-credentials.json` is in `.gitignore`), point the
 setting at it, and sign in once:
 
 ```toml
