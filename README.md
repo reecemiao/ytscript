@@ -391,22 +391,32 @@ A **"Google hasn't verified this app"** page is the milder one and not a refusal
 
 ### Behind a proxy
 
-`WinError 10060`, `ConnectionError` or a plain timeout out of `drive-auth` or a run means
-the call never reached `www.googleapis.com`. Sign-in can succeed and this still happen a
-moment later, because they do not agree on where the proxy is: yt-dlp reads the system
-proxy settings, and the Google client only reads the environment. Give it the same
-proxy, and everything else in the run keeps working as before:
+Uploads go to `www.googleapis.com`, which is not always reachable directly. ytscript
+uses whatever proxy the rest of the machine uses — `HTTPS_PROXY` and friends first, then
+the Windows registry or the macOS network settings, the same places yt-dlp looks — so a
+setup where downloads already work needs nothing more. `ytscript run -v` says which
+proxy it picked.
+
+Only when the machine has none configured is there anything to set:
 
 ```powershell
 $env:HTTPS_PROXY = "http://127.0.0.1:7890"   # your client's HTTP port
-$env:HTTP_PROXY  = "http://127.0.0.1:7890"
-ytscript drive-auth
 ```
 
-A SOCKS-only client takes `socks5://127.0.0.1:1080` in the same variables. To check the
-port before believing anything else, `curl.exe --proxy http://127.0.0.1:7890
-https://www.googleapis.com/drive/v3/about` should answer `401` — Google reached, and
-merely asking for credentials. Set the same variables wherever the scheduled run lives.
+A SOCKS-only client takes `socks5://127.0.0.1:1080` in the same variable. The port is
+worth reading rather than guessing; on Windows this prints the one the system uses:
+
+```
+reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Internet Settings" /v ProxyServer
+```
+
+Two failures look alike from the outside and are worth telling apart. A timeout
+(`WinError 10060`) says the request went out and nothing came back; the error names the
+proxy it went through, or says it went direct. A complaint about **PySocks** means the
+proxy was ignored rather than used: httplib2, which the Google client is built on,
+silently declines to proxy anything when PySocks is missing, so a proxy setting that
+looks right does nothing at all. The `drive` extra installs it, and `uv sync --extra
+drive` is the repair.
 
 ### Who this lets into your Drive
 

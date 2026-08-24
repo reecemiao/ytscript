@@ -20,10 +20,14 @@ local = ["faster-whisper>=1.1.0"]
 # Hosted speech-to-text via the OpenAI audio transcription endpoint.
 openai = ["openai>=1.30.0"]
 # Copy the finished scripts into Google Drive. Independent of the two backends.
+# PySocks is not optional in practice: without it httplib2, which the Google client
+# is built on, quietly ignores every proxy setting instead of using one.
 drive = [
     "google-api-python-client>=2.100",
     "google-auth>=2.30",
+    "google-auth-httplib2>=0.2",
     "google-auth-oauthlib>=1.2",
+    "pysocks>=1.7",
 ]
 
 [project.scripts]
