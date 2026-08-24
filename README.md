@@ -323,6 +323,19 @@ The wider `drive` scope *is* restricted and does need that review before it can 
 published, which is one more reason to leave `drive_scope` alone unless an existing
 folder makes it necessary — or to use a service account, which none of this applies to.
 
+**"Access blocked: … has not completed the Google verification process"** is Google
+refusing the sign-in, before ytscript sees anything. One of three things:
+
+- The app is still in `Testing` and the account signing in is not on the test-user list.
+  Watch for a browser signed in as somebody other than the project's owner. Add the
+  address under **Audience → Test users**, or publish the app.
+- The app is published and the **Data Access** page lists a sensitive or restricted
+  scope. Production needs the verification review for those. Take the scope off that
+  page — ytscript only ever asks for the one in `drive_scope` — or go back to `Testing`.
+- A Workspace administrator blocks unverified third-party apps outright. Nothing in the
+  Cloud project changes that: on a Workspace you own, user type **Internal** sidesteps
+  verification altogether, and otherwise a service account is the way through.
+
 Save the JSON in the checkout (`drive-credentials.json` is in `.gitignore`), point the
 setting at it, and sign in once:
 
@@ -388,9 +401,15 @@ Changing the scope invalidates the cached sign-in — delete `drive_token_file` 
 ### Unattended, without a browser
 
 A service account signs in with a key file instead of a browser, which suits a server
-that has neither. Create one in the same Cloud project, download its JSON key, then
-share a Drive folder with the account's `...iam.gserviceaccount.com` address (Editor)
-and point ytscript at both:
+that has neither. It also walks past everything above: no consent screen, no test users,
+no verification, no `drive-auth`, and no token that expires after a week. In the same
+Cloud project:
+
+1. **IAM & Admin → Service Accounts → Create service account.**
+2. On the new account, **Keys → Add key → Create new key → JSON**, and save it as
+   `drive-service-account.json` in the checkout (it is in `.gitignore`).
+3. In Drive, make the folder the scripts should go to and **Share** it with the
+   account's `...@....iam.gserviceaccount.com` address as **Editor**.
 
 ```toml
 drive_upload = true
@@ -398,9 +417,14 @@ drive_service_account_file = "drive-service-account.json"
 drive_folder_id = "1AbC..."      # the folder shared with the service account
 ```
 
-`drive_folder_id` is required here: a service account has no Drive of its own to write
-to, and ytscript refuses the combination up front rather than failing on the first
-upload. Set `drive_credentials_file` or `drive_service_account_file`, not both.
+`ytscript run` then uploads with no further setup. `drive_folder_id` is required here: a
+service account has no Drive of its own to write to, and ytscript refuses the
+combination up front rather than failing on the first upload. Set
+`drive_credentials_file` or `drive_service_account_file`, not both.
+
+The tradeoff is ownership — the uploaded files belong to the service account, and you
+see them through the shared folder. Signing in as yourself with `drive-auth` is the way
+to own them outright.
 
 ## Running it on a schedule
 
