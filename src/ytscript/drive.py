@@ -37,6 +37,16 @@ _INSTALL_HINT = (
 
 _AUTH_HINT = "run 'ytscript drive-auth' once to authorise the upload"
 
+_PROXY_HINT = (
+    "if this machine reaches Google through a proxy, set HTTPS_PROXY in the environment "
+    "(e.g. http://127.0.0.1:7890): the Google client reads the proxy from there, and "
+    "unlike yt-dlp it does not pick up the system proxy settings"
+)
+
+# Names of the client's own errors for a request that never got an answer. Everything
+# else it raises means Google replied, and the reply says more than a hint would.
+_UNREACHED = ("ServerNotFoundError", "ProxyError", "ConnectionError", "Timeout")
+
 
 class DriveError(RuntimeError):
     """Raised when Drive is unreachable, unauthorised, or refuses a file."""
@@ -79,6 +89,15 @@ def parse_folder_id(value: str) -> str:
         f"could not read a folder id out of drive_folder_id {value!r}; "
         "paste the id itself or the https://drive.google.com/drive/folders/... URL"
     )
+
+
+def _never_reached_google(exc: BaseException) -> bool:
+    """Whether the call died on the wire — a timeout, a refused connection, DNS.
+
+    ``OSError`` covers the socket errors, including the Windows ``WinError 10060``
+    timeout that a blocked or unproxied connection to googleapis.com produces.
+    """
+    return isinstance(exc, OSError) or type(exc).__name__ in _UNREACHED
 
 
 def _quote(value: str) -> str:
@@ -263,7 +282,8 @@ class DriveUploader:
         try:
             return request.execute()
         except Exception as exc:
-            raise DriveError(f"{what} failed: {exc}") from exc
+            hint = f"; {_PROXY_HINT}" if _never_reached_google(exc) else ""
+            raise DriveError(f"{what} failed: {exc}{hint}") from exc
 
     def _find(self, name: str, parent: str | None, mime: str | None = None) -> str | None:
         """Id of a non-trashed file of that name in that folder, if there is one."""

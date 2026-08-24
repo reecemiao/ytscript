@@ -389,6 +389,25 @@ turning the sign-in away, before ytscript sees anything. One of three things:
 A **"Google hasn't verified this app"** page is the milder one and not a refusal:
 **Advanced → Go to …** carries on. It is your own app on your own project.
 
+### Behind a proxy
+
+`WinError 10060`, `ConnectionError` or a plain timeout out of `drive-auth` or a run means
+the call never reached `www.googleapis.com`. Sign-in can succeed and this still happen a
+moment later, because they do not agree on where the proxy is: yt-dlp reads the system
+proxy settings, and the Google client only reads the environment. Give it the same
+proxy, and everything else in the run keeps working as before:
+
+```powershell
+$env:HTTPS_PROXY = "http://127.0.0.1:7890"   # your client's HTTP port
+$env:HTTP_PROXY  = "http://127.0.0.1:7890"
+ytscript drive-auth
+```
+
+A SOCKS-only client takes `socks5://127.0.0.1:1080` in the same variables. To check the
+port before believing anything else, `curl.exe --proxy http://127.0.0.1:7890
+https://www.googleapis.com/drive/v3/about` should answer `401` — Google reached, and
+merely asking for credentials. Set the same variables wherever the scheduled run lives.
+
 ### Who this lets into your Drive
 
 Only you. Publishing is about the consent screen, not about your files: it means any
