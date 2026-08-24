@@ -91,6 +91,9 @@ jobs:
           - extra: drive
             # The connector imports the client lazily, so name it too.
             import: "ytscript.drive, googleapiclient.discovery, google_auth_oauthlib.flow, google_auth_httplib2, socks"
+          - extra: zh
+            # Imported lazily as well, and only when convert_to_simplified is on.
+            import: "ytscript.polish, opencc"
     steps:
       - uses: actions/checkout@v5
 
