@@ -214,6 +214,37 @@ the output has to be uniform, run a converter such as [OpenCC] over the scripts
 afterwards. The prompt also matters if you change `language`: a Chinese seed on English
 audio makes the transcription worse, so change or remove it along with the language.
 
+### Seeding the vocabulary of a niche channel
+
+The seed sentence is also the one place to hand Whisper the words a channel says every
+episode. On jargon-heavy audio it mishears the terms it has the least training data for
+— tickers, fund names, indicator names — and, having no dictionary to snap to, it spells
+them a different way each time. A seed that simply contains the right spellings pulls
+the decoder towards them. For a US-markets channel in Mandarin:
+
+```toml
+whisper_initial_prompt = "以下是普通话的美股财经节目,涉及标普500、纳指、费城半导体、美联储、国债收益率、财报前瞻、估值、支撑位、压力位、RSI超买、顶背离、多头、空头、看跌期权、对冲基金13F、加仓、减仓、清仓。常见代码:SPY、QQQ、SOXX、SMH、IGV、NVDA、AVGO、TSM、ASML、MU、AAPL、MSFT、GOOGL、AMZN、META、TSLA、ORCL、PLTR、CRWV。"
+```
+
+Write it as prose the speaker could plausibly have just said, and keep the simplified
+(or traditional) characters the section above is about — the seed does both jobs at once.
+
+Two limits are worth knowing before writing a long one:
+
+- Whisper reads at most 224 tokens of prompt, and anything over that is dropped **from
+  the front**. The example above is 190, roughly 200 Chinese characters or 30 tickers.
+  Put what matters most at the end.
+- At `whisper_batch_size > 1` — the default — faster-whisper turns off conditioning on
+  previously decoded text and feeds the seed to *every* clip instead, so it steers the
+  whole video rather than fading out after the first few minutes. That also means the
+  seed is the only context the model gets, which is why a name can come out two ways in
+  one video unless the seed pins it.
+
+The seed only shifts probabilities, so a term that has to be exactly right every time
+still wants a find-and-replace pass over the finished script. Names the model has never
+plausibly seen are the ones to leave out: a seed listing them is as likely to make it
+sprinkle them into unrelated sentences as to fix the mishearing.
+
 Output is written with no spaces between Chinese segments, the way the language is
 written; a Latin word inside a sentence still keeps the spaces on either side of it.
 

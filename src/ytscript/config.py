@@ -230,7 +230,8 @@ whisper_compute_type = "float16"
 
 # Whisper transcribes Mandarin into traditional characters about as readily as
 # simplified. A simplified-character seed sentence settles it. Change or clear
-# this if you change `language`.
+# this if you change `language`. A jargon-heavy channel can spend the rest of the
+# 224-token budget on the tickers and terms it repeats — see the README.
 whisper_initial_prompt = "以下是普通话的句子。"
 
 # Clips decoded at once — several times faster than one at a time, at the cost
