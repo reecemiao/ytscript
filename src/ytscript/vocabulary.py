@@ -164,14 +164,29 @@ def builtin_names() -> list[str]:
     return sorted(path.stem for path in DATA_DIR.glob("*.txt"))
 
 
+def _is_builtin_name(name: str) -> bool:
+    """A built-in is a bare stem: no directory and no suffix, on any platform.
+
+    Both separators are checked whatever the platform is running: a Windows path
+    has no forward slash in it, and treating ``C:\\scripts\\mine.txt`` as the name
+    of a built-in is how this went wrong once already.
+    """
+    return not any(separator in name for separator in ("/", "\\")) and not Path(name).suffix
+
+
 def load_vocabulary(name: str | Path | None) -> Vocabulary:
     """Load a built-in vocabulary by name, or a file by path. ``None`` loads nothing."""
     if name is None or name == "":
         return Vocabulary()
-    path = DATA_DIR / f"{name}.txt" if isinstance(name, str) and "/" not in name else Path(name)
-    if not path.is_file():
-        raise VocabularyError(
-            f"no vocabulary {str(name)!r}: expected a file path or one of "
-            f"{', '.join(builtin_names())}"
-        )
-    return parse_vocabulary(path.read_text(encoding="utf-8"), source=str(path))
+    candidates: list[Path] = []
+    if isinstance(name, str) and _is_builtin_name(name):
+        candidates.append(DATA_DIR / f"{name}.txt")
+    # A file of that name is still worth a look, so a built-in never shadows one.
+    candidates.append(Path(name))
+
+    for candidate in candidates:
+        if candidate.is_file():
+            return parse_vocabulary(candidate.read_text(encoding="utf-8"), source=str(candidate))
+    raise VocabularyError(
+        f"no vocabulary {str(name)!r}: expected a file path or one of {', '.join(builtin_names())}"
+    )

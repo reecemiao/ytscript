@@ -8,6 +8,7 @@ import pytest
 from ytscript.models import Video
 from ytscript.vocabulary import (
     VocabularyError,
+    _is_builtin_name,
     load_vocabulary,
     parse_vocabulary,
     seed_prompt,
@@ -89,9 +90,20 @@ def test_load_vocabulary_finds_the_builtin_and_a_path(tmp_path: Path) -> None:
     path = tmp_path / "mine.txt"
     path.write_text("蜂蜜 => 蜂蜜柠檬\n", encoding="utf-8")
     assert load_vocabulary(path).correct("蜂蜜") == "蜂蜜柠檬"
+    # A path out of a config file arrives as a string, not a Path.
+    assert load_vocabulary(str(path)).correct("蜂蜜") == "蜂蜜柠檬"
 
     assert not load_vocabulary(None)
     assert not load_vocabulary("")
+
+
+def test_only_a_bare_stem_names_a_builtin() -> None:
+    # Checked on every platform: a Windows path holds no forward slash, so
+    # looking for one alone read C:\scripts\mine.txt as the name of a built-in.
+    assert _is_builtin_name("zh-finance")
+    assert not _is_builtin_name(r"C:\scripts\mine.txt")
+    assert not _is_builtin_name("scripts/mine.txt")
+    assert not _is_builtin_name("mine.txt")
 
 
 def test_load_vocabulary_says_what_it_expected() -> None:
