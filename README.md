@@ -133,7 +133,9 @@ audio_format = "bestaudio[ext=m4a]/bestaudio/best"
 # cookies_file = "cookies.txt"        # Netscape cookies.txt export
 # cookies_from_browser = "firefox"    # BROWSER[+KEYRING][:PROFILE][::CONTAINER]
 include_members_only = false          # true also transcribes members-only videos
-```
+
+[glossary]                   # search-and-replace run over the finished script
+"CIWV" = "CRWV"
 
 Every key has a matching environment variable: `YTSCRIPT_CHANNEL`,
 `YTSCRIPT_LANGUAGE`, `YTSCRIPT_BACKEND`, and so on.
@@ -223,16 +225,19 @@ them a different way each time. A seed that simply contains the right spellings 
 the decoder towards them. For a US-markets channel in Mandarin:
 
 ```toml
-whisper_initial_prompt = "以下是普通话的美股财经节目,涉及标普500、纳指、费城半导体、美联储、国债收益率、财报前瞻、估值、支撑位、压力位、RSI超买、顶背离、多头、空头、看跌期权、对冲基金13F、加仓、减仓、清仓。常见代码:SPY、QQQ、SOXX、SMH、IGV、NVDA、AVGO、TSM、ASML、MU、AAPL、MSFT、GOOGL、AMZN、META、TSLA、ORCL、PLTR、CRWV。"
+whisper_initial_prompt = "以下是普通话的美股财经节目。今天讲费城半导体、纳指、标普、软件IGV、存储、光模块、数据中心。美联储议息会议、初请失业金、CPI分项、押注加息概率、国债收益率。前瞻估值、技术面、支撑位、压力位、套牢盘、缩量、放量、跳空、止跌、回撤、RSI超买、顶背离、均值回归。代码有NVDA、AVGO、TSM、MU、CRWV、NBIS、SNDK、CRM、INTU、ADBE、UNH。"
 ```
 
 Write it as prose the speaker could plausibly have just said, and keep the simplified
 (or traditional) characters the section above is about — the seed does both jobs at once.
+Every token spent on a word the model already gets right is a token wasted, so build the
+list from what a first pass actually got *wrong*, not from what the channel talks about.
 
 Two limits are worth knowing before writing a long one:
 
 - Whisper reads at most 224 tokens of prompt, and anything over that is dropped **from
-  the front**. The example above is 190, roughly 200 Chinese characters or 30 tickers.
+  the front**. The example above is 204, roughly 180 Chinese characters. A ticker costs
+  two to four tokens, a Chinese character usually one.
   Put what matters most at the end.
 - At `whisper_batch_size > 1` — the default — faster-whisper turns off conditioning on
   previously decoded text and feeds the seed to *every* clip instead, so it steers the
@@ -240,10 +245,38 @@ Two limits are worth knowing before writing a long one:
   seed is the only context the model gets, which is why a name can come out two ways in
   one video unless the seed pins it.
 
-The seed only shifts probabilities, so a term that has to be exactly right every time
-still wants a find-and-replace pass over the finished script. Names the model has never
-plausibly seen are the ones to leave out: a seed listing them is as likely to make it
-sprinkle them into unrelated sentences as to fix the mishearing.
+Names the model has never plausibly seen are the ones to leave out: a seed listing them
+is as likely to make it sprinkle them into unrelated sentences as to fix the mishearing.
+
+### Correcting what the seed cannot
+
+The seed only shifts probabilities, and it runs out of room long before a channel runs
+out of jargon. What survives it is at least consistent — a mangled ticker comes back the
+same handful of ways every episode — so `glossary` finishes the job with a plain
+search-and-replace over the finished script, before it is written in any format:
+
+```toml
+[glossary]
+"CIWV" = "CRWV"
+"S&DK" = "SNDK"
+"UOMH" = "UNH"
+"肺瓣" = "费半"
+"ISI" = "RSI"
+```
+
+Longer keys are applied first, so a rule for `费城半导体` still wins over one for `费半`.
+There is no word boundary and no regex: the key matches anywhere, which is what makes it
+work on Chinese and also what makes a short key dangerous — `CW` would rewrite the middle
+of `CWEB`, and a key that is a real word elsewhere will eat it. Keep the left side long
+enough to be unambiguous, and prefer the prompt for anything context-dependent: `压住`
+is the wrong word for 押注 in a sentence about odds and the right one in a sentence about
+a resistance level, and only the prompt can tell those apart.
+
+The environment variable takes the same pairs on one line:
+
+```bash
+YTSCRIPT_GLOSSARY="CIWV=CRWV,S&DK=SNDK" ytscript run
+```
 
 Output is written with no spaces between Chinese segments, the way the language is
 written; a Latin word inside a sentence still keeps the spaces on either side of it.

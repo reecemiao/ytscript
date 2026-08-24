@@ -189,3 +189,11 @@ def test_members_only_videos_are_taken_when_signed_in(tmp_path: Path) -> None:
 
     assert report.members_only == []
     assert sorted(client.downloaded) == ["vid000", "vid001", "vid002"]
+
+
+def test_glossary_is_applied_to_the_written_script(tmp_path: Path) -> None:
+    pipeline, _, _ = build(tmp_path, make_videos(1), glossary={"Hello there.": "Hi there."})
+    pipeline.run()
+
+    written = (tmp_path / "scripts").glob("*.txt")
+    assert "Hi there." in next(written).read_text(encoding="utf-8")

@@ -52,6 +52,9 @@ class Config:
     openai_model: str = "whisper-1"
     openai_api_key_env: str = "OPENAI_API_KEY"
 
+    glossary: dict[str, str] = field(default_factory=dict)
+    """Search-and-replace pairs applied to the finished transcript, mishearing to term."""
+
     # --- output ---------------------------------------------------------
     output_dir: Path = Path("scripts")
     output_formats: tuple[str, ...] = ("txt",)
@@ -121,6 +124,12 @@ class Config:
             raise ConfigError("check_limit must be at least 1")
         if self.whisper_batch_size < 1:
             raise ConfigError("whisper_batch_size must be at least 1 (1 turns batching off)")
+        for wrong, right in self.glossary.items():
+            if not wrong or not isinstance(right, str):
+                raise ConfigError(
+                    f"glossary entry {wrong!r} = {right!r}: expected a non-empty "
+                    "mishearing and the text to put in its place"
+                )
         if self.include_members_only and not (self.cookies_file or self.cookies_from_browser):
             raise ConfigError(
                 "include_members_only needs a signed-in session: set cookies_file or "
@@ -147,7 +156,25 @@ def _coerce(name: str, raw: str) -> Any:
         return float(raw)
     if name == "output_formats":
         return tuple(part.strip() for part in raw.split(",") if part.strip())
+    if "dict" in declared:
+        return _parse_pairs(name, raw)
     return raw
+
+
+def _parse_pairs(name: str, raw: str) -> dict[str, str]:
+    """``wrong=right,wrong=right`` — the environment's version of a TOML table."""
+    pairs = {}
+    for item in raw.split(","):
+        if not item.strip():
+            continue
+        key, separator, value = item.partition("=")
+        if not separator or not key.strip():
+            raise ConfigError(
+                f"{ENV_PREFIX}{name.upper()}: expected comma-separated 'wrong=right' "
+                f"pairs, got {item.strip()!r}"
+            )
+        pairs[key.strip()] = value.strip()
+    return pairs
 
 
 def find_config_file(start: Path | None = None) -> Path | None:
@@ -251,4 +278,9 @@ keep_audio = false
 # cookies_file = "cookies.txt"
 # cookies_from_browser = "firefox"          # BROWSER[+KEYRING][:PROFILE][::CONTAINER]
 include_members_only = false
+
+# Search and replace run over the finished script, for the words the seed
+# sentence above only nudges. Keep the left side long enough to be unambiguous.
+# [glossary]
+# "费半" = "费城半导体"
 """

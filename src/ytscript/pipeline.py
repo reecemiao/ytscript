@@ -10,6 +10,7 @@ from pathlib import Path
 
 from .config import Config
 from .formatting import write_outputs
+from .glossary import correct_segments
 from .models import RunReport, Transcript, Video
 from .state import State
 from .transcribers import Transcriber, TranscriptionError, build_transcriber
@@ -125,6 +126,10 @@ class Pipeline:
             segments, language = self.transcriber.transcribe(audio_path, config.language)
             if not segments:
                 raise TranscriptionError("no speech was recognised in the audio")
+            if config.glossary:
+                segments, fixed = correct_segments(segments, config.glossary)
+                if fixed:
+                    log.info("%s: glossary corrected %d occurrence(s)", video.id, fixed)
             transcript = Transcript(
                 video=video,
                 segments=segments,

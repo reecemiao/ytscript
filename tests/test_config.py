@@ -125,3 +125,22 @@ def test_members_only_reads_from_file_and_env(tmp_path: Path) -> None:
 
     off = load_config(path=path, env={"YTSCRIPT_INCLUDE_MEMBERS_ONLY": "false"})
     assert off.include_members_only is False
+
+
+def test_glossary_loads_from_a_toml_table_and_from_the_environment(tmp_path: Path) -> None:
+    path = write_config(
+        tmp_path,
+        'channel = "@x"\n\n[glossary]\n"肺瓣" = "费半"\n',
+    )
+    assert load_config(path=path, env={}).glossary == {"肺瓣": "费半"}
+
+    config = load_config(path=path, env={"YTSCRIPT_GLOSSARY": "CIWV=CRWV, ISI=RSI"})
+    assert config.glossary == {"CIWV": "CRWV", "ISI": "RSI"}
+
+
+def test_a_glossary_entry_without_a_replacement_is_refused(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError, match="glossary entry"):
+        Config(channel="@x", glossary={"": "费半"}).validate()
+
+    with pytest.raises(ConfigError, match="YTSCRIPT_GLOSSARY"):
+        load_config(path=None, env={"YTSCRIPT_GLOSSARY": "CIWV"}, search_from=tmp_path)
