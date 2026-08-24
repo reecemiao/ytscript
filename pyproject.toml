@@ -19,6 +19,12 @@ dependencies = [
 local = ["faster-whisper>=1.1.0"]
 # Hosted speech-to-text via the OpenAI audio transcription endpoint.
 openai = ["openai>=1.30.0"]
+# Copy the finished scripts into Google Drive. Independent of the two backends.
+drive = [
+    "google-api-python-client>=2.100",
+    "google-auth>=2.30",
+    "google-auth-oauthlib>=1.2",
+]
 
 [project.scripts]
 ytscript = "ytscript.cli:main"

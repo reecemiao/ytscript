@@ -9,6 +9,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from .config import Config
+from .drive import DriveError, DriveFile, DriveUploader
 from .formatting import write_outputs
 from .models import RunReport, Transcript, Video
 from .state import State
@@ -45,6 +46,7 @@ class Pipeline:
         config: Config,
         client: YouTubeClient | None = None,
         transcriber: Transcriber | None = None,
+        uploader: DriveUploader | None = None,
     ) -> None:
         config.validate()
         self.config = config
@@ -54,6 +56,7 @@ class Pipeline:
             cookies_from_browser=config.cookies_from_browser,
         )
         self._transcriber = transcriber
+        self._uploader = uploader
 
     @property
     def transcriber(self) -> Transcriber:
@@ -61,6 +64,13 @@ class Pipeline:
         if self._transcriber is None:
             self._transcriber = build_transcriber(self.config)
         return self._transcriber
+
+    @property
+    def uploader(self) -> DriveUploader:
+        # Built on demand too: a run with drive_upload off never touches the connector.
+        if self._uploader is None:
+            self._uploader = DriveUploader.from_config(self.config)
+        return self._uploader
 
     def list_videos(self, limit: int | None = None) -> list[Video]:
         count = limit if limit is not None else self.config.check_limit
@@ -94,18 +104,25 @@ class Pipeline:
             report.written = [f"{video.id} ({video.title})" for video in pending]
             return report
 
+        # Sign in before the first download, so a stale token costs a second
+        # rather than a whole backfill.
+        if config.drive_upload:
+            self.uploader.connect()
+
         with _audio_workspace(config) as audio_dir:
             for index, video in enumerate(pending, start=1):
                 label = f"[{index}/{len(pending)}] {video.title}"
                 if on_progress:
                     on_progress(label)
                 try:
-                    paths = self._process(video, audio_dir)
-                except (YouTubeError, TranscriptionError) as exc:
+                    paths, uploads = self._process(video, audio_dir)
+                except (YouTubeError, TranscriptionError, DriveError) as exc:
                     log.warning("%s failed: %s", video.id, exc)
                     report.failed.append((video.id, str(exc)))
                     continue
                 report.written.extend(str(path) for path in paths)
+                report.uploaded.extend(str(upload) for upload in uploads)
+                drive = [{"id": f.id, "name": f.name, "link": f.link} for f in uploads]
                 state.record(
                     video.id,
                     title=video.title,
@@ -113,12 +130,13 @@ class Pipeline:
                     upload_date=video.upload_date.isoformat() if video.upload_date else None,
                     outputs=[str(path) for path in paths],
                     backend=self.transcriber.name,
+                    drive=drive or None,
                 )
                 # Saved per video so an interrupted backfill does not redo work.
                 state.save()
         return report
 
-    def _process(self, video: Video, audio_dir: Path) -> list[Path]:
+    def _process(self, video: Video, audio_dir: Path) -> tuple[list[Path], list[DriveFile]]:
         config = self.config
         audio_path, video = self.client.download_audio(video, audio_dir)
         try:
@@ -131,13 +149,15 @@ class Pipeline:
                 language=language or config.language,
                 backend=self.transcriber.name,
             )
-            return write_outputs(
+            paths = write_outputs(
                 transcript,
                 config.output_dir,
                 formats=config.output_formats,
                 timestamps=config.timestamps,
                 gap=config.paragraph_gap,
             )
+            uploads = self.uploader.upload_all(paths) if config.drive_upload else []
+            return paths, uploads
         finally:
             if not config.keep_audio and config.audio_dir is None:
                 audio_path.unlink(missing_ok=True)

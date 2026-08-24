@@ -13,6 +13,7 @@ ENV_PREFIX = "YTSCRIPT_"
 
 BACKENDS = ("faster-whisper", "openai")
 OUTPUT_FORMATS = ("txt", "md", "json")
+DRIVE_SCOPES = ("drive.file", "drive")
 
 
 class ConfigError(ValueError):
@@ -61,6 +62,29 @@ class Config:
     paragraph_gap: float = 2.0
     """Silence in seconds between segments that starts a new paragraph."""
 
+    # --- Google Drive (optional) -----------------------------------------
+    drive_upload: bool = False
+    """Also copy every finished script into Google Drive. Local files are written either way."""
+
+    drive_folder_id: str | None = None
+    """Folder the scripts land in, as an id or a folder URL. ``None`` uses ``drive_folder_name``."""
+
+    drive_folder_name: str | None = "ytscript"
+    """Folder created in My Drive when no ``drive_folder_id`` is set. Empty uploads to the root."""
+
+    drive_credentials_file: Path | None = None
+    """OAuth client secrets JSON for a desktop app, downloaded from the Google Cloud console."""
+
+    drive_token_file: Path = Path(".ytscript-drive-token.json")
+    """Where ``ytscript drive-auth`` caches the sign-in so later runs need no browser."""
+
+    drive_service_account_file: Path | None = None
+    """Service account key, for unattended runs. Needs a folder shared with the account."""
+
+    drive_scope: str = "drive.file"
+    """``drive.file`` only sees what ytscript uploads; ``drive`` is needed for a folder it
+    did not create itself."""
+
     # --- plumbing --------------------------------------------------------
     state_file: Path = Path(".ytscript-state.json")
     audio_dir: Path | None = None
@@ -88,6 +112,13 @@ class Config:
             self.audio_dir = Path(self.audio_dir)
         if self.cookies_file is not None:
             self.cookies_file = Path(self.cookies_file)
+        self.drive_token_file = Path(self.drive_token_file)
+        if self.drive_credentials_file is not None:
+            self.drive_credentials_file = Path(self.drive_credentials_file)
+        if self.drive_service_account_file is not None:
+            self.drive_service_account_file = Path(self.drive_service_account_file)
+        if not self.drive_folder_name:
+            self.drive_folder_name = None
         if isinstance(self.output_formats, str):
             self.output_formats = tuple(
                 part.strip() for part in self.output_formats.split(",") if part.strip()
@@ -125,6 +156,32 @@ class Config:
             raise ConfigError(
                 "include_members_only needs a signed-in session: set cookies_file or "
                 "cookies_from_browser to an account that holds the channel's membership"
+            )
+        if self.drive_upload:
+            self.validate_drive()
+
+    def validate_drive(self) -> None:
+        """Check the Google Drive settings on their own, whether or not uploads are on."""
+        if self.drive_scope not in DRIVE_SCOPES:
+            raise ConfigError(
+                f"unknown drive_scope {self.drive_scope!r}; "
+                f"expected one of {', '.join(DRIVE_SCOPES)}"
+            )
+        if self.drive_credentials_file and self.drive_service_account_file:
+            raise ConfigError(
+                "set drive_credentials_file or drive_service_account_file, not both: "
+                "the first signs in as you, the second as a robot account"
+            )
+        if not (self.drive_credentials_file or self.drive_service_account_file):
+            raise ConfigError(
+                "Google Drive uploads need credentials: set drive_credentials_file to the "
+                "OAuth client secrets JSON from the Google Cloud console, or "
+                "drive_service_account_file to a service account key"
+            )
+        if self.drive_service_account_file and not self.drive_folder_id:
+            raise ConfigError(
+                "a service account has no Drive of its own: share a folder with the account's "
+                "address and set drive_folder_id to it"
             )
 
 
@@ -244,6 +301,15 @@ timestamps = false
 
 state_file = ".ytscript-state.json"
 keep_audio = false
+
+# Optional: also copy every finished script into Google Drive. Install the extra
+# with `uv sync --extra drive`, point drive_credentials_file at the OAuth client
+# secrets JSON from the Google Cloud console, then run `ytscript drive-auth` once.
+drive_upload = false
+# drive_credentials_file = "drive-credentials.json"
+drive_folder_name = "ytscript"          # folder made in My Drive for the scripts
+# drive_folder_id = "1AbC..."           # an existing folder instead; needs drive_scope = "drive"
+# drive_service_account_file = "drive-service-account.json"   # unattended runs
 
 # Members-only videos are skipped unless you sign in. Point one of the two cookie
 # settings at an account that holds the membership, then turn the flag on.

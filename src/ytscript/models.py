@@ -80,3 +80,6 @@ class RunReport:
     failed: list[tuple[str, str]] = field(default_factory=list)
     members_only: list[str] = field(default_factory=list)
     """Videos passed over because ``include_members_only`` is off."""
+
+    uploaded: list[str] = field(default_factory=list)
+    """Scripts copied into Google Drive, as ``name  link``. Empty unless ``drive_upload`` is on."""

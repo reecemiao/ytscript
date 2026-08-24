@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 from .config import SAMPLE_CONFIG, Config, ConfigError, load_config
+from .drive import DriveError, DriveUploader
 from .models import RunReport
 from .pipeline import Pipeline
 from .youtube import YouTubeError
@@ -82,6 +83,27 @@ def build_parser() -> argparse.ArgumentParser:
         help="comma separated list of txt, md, json",
     )
     run.add_argument("--timestamps", action="store_true", default=None)
+    drive = run.add_mutually_exclusive_group()
+    drive.add_argument(
+        "--drive",
+        dest="drive_upload",
+        action="store_true",
+        default=None,
+        help="also copy every script into Google Drive; run 'ytscript drive-auth' first",
+    )
+    drive.add_argument(
+        "--no-drive",
+        dest="drive_upload",
+        action="store_false",
+        default=None,
+        help="keep the scripts local (the default)",
+    )
+    run.add_argument(
+        "--drive-folder",
+        dest="drive_folder_id",
+        metavar="ID_OR_URL",
+        help="Google Drive folder the scripts go into",
+    )
     run.add_argument("--keep-audio", dest="keep_audio", action="store_true", default=None)
     run.add_argument("--state-file", dest="state_file", type=Path)
     run.add_argument(
@@ -93,6 +115,11 @@ def build_parser() -> argparse.ArgumentParser:
     listing = sub.add_parser("list", help="show the newest videos on the channel")
     add_common(listing)
     listing.add_argument("--limit", type=int, default=10)
+
+    sub.add_parser(
+        "drive-auth",
+        help="sign in to Google Drive once and cache the token for later runs",
+    )
 
     init = sub.add_parser("init", help="write a starter ytscript.toml")
     init.add_argument("--path", type=Path, default=Path("ytscript.toml"))
@@ -115,6 +142,8 @@ _OVERRIDE_FIELDS = (
     "cookies_file",
     "cookies_from_browser",
     "include_members_only",
+    "drive_upload",
+    "drive_folder_id",
 )
 
 
@@ -145,6 +174,10 @@ def _print_report(report: RunReport, dry_run: bool) -> None:
         print(f"wrote {len(report.written)} file(s):")
     for item in report.written:
         print(f"  {item}")
+    if report.uploaded:
+        print(f"uploaded {len(report.uploaded)} file(s) to Google Drive:")
+        for item in report.uploaded:
+            print(f"  {item}")
     for video_id, error in report.failed:
         print(f"  failed: {video_id}: {error}", file=sys.stderr)
 
@@ -178,6 +211,22 @@ def cmd_list(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_drive_auth(args: argparse.Namespace) -> int:
+    # No channel is needed to authorise, so this skips the usual validation.
+    config = load_config(path=args.config)
+    config.validate_drive()
+    uploader = DriveUploader.from_config(config)
+    token = uploader.authorize()
+    where = uploader.folder or "the root of My Drive"
+    if token is not None:
+        print(f"authorised; the token is cached in {token}")
+    else:
+        print("the service account key works")
+    print(f"scripts will be uploaded to {where}")
+    print("turn uploads on with drive_upload = true, or pass --drive to a run")
+    return 0
+
+
 def cmd_init(args: argparse.Namespace) -> int:
     path: Path = args.path
     if path.exists() and not args.force:
@@ -199,10 +248,15 @@ def main(argv: list[str] | None = None) -> int:
         parser.print_help()
         return 2
 
-    handlers = {"run": cmd_run, "list": cmd_list, "init": cmd_init}
+    handlers = {
+        "run": cmd_run,
+        "list": cmd_list,
+        "init": cmd_init,
+        "drive-auth": cmd_drive_auth,
+    }
     try:
         return handlers[args.command](args)
-    except (ConfigError, YouTubeError) as exc:
+    except (ConfigError, YouTubeError, DriveError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
     except KeyboardInterrupt:  # pragma: no cover

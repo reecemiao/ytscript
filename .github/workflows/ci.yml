@@ -81,12 +81,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Declared as conflicting in pyproject.toml, so resolve one at a time.
+        # The two backends are declared as conflicting in pyproject.toml, so
+        # resolve one at a time. drive is independent of both.
         include:
           - extra: local
             import: ytscript.transcribers.faster_whisper
           - extra: openai
             import: ytscript.transcribers.openai_api
+          - extra: drive
+            # The connector imports the client lazily, so name it too.
+            import: "ytscript.drive, googleapiclient.discovery, google_auth_oauthlib.flow"
     steps:
       - uses: actions/checkout@v5
 
