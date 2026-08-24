@@ -307,42 +307,14 @@ getting one is free, with no billing account. In the [Google Cloud console]:
    interface): fill in the app name and your email, with user type **External**, or
    **Internal** on a Workspace account.
 4. **Clients → Create client**, application type **Desktop app**, then **Download JSON**.
-5. **Audience → Publish app**. Worth doing now; see below.
+5. **Audience → Publish app**, which saves a weekly re-authorisation; see below.
 
 The file starts with `{"installed": {"client_id": "....apps.googleusercontent.com"`. One
 that starts with `"web"` came from the wrong application type, and one holding
 `"type": "service_account"` belongs in `drive_service_account_file` instead.
 
-**Publish the app, or the token expires every week.** While the publishing status is
-`Testing`, Google hands out refresh tokens that stop working after 7 days, so an
-unattended run dies a week after you authorised it. Publishing costs nothing and is
-instant: the default `drive.file` scope is not a sensitive one, so Google does not put
-the app through its verification review. Leaving it in `Testing` also means adding your
-own account under **Audience → Test users**, since a testing app refuses everyone else;
-once it is published, that list stops mattering.
-
-Publishing does not rescue a token you already have. The 7 days are stamped on the
-refresh token when it is issued, so a sign-in from before the app was published still
-stops working a week later. Delete `drive_token_file` and run `drive-auth` again.
-The wider `drive` scope *is* restricted and does need that review before it can be
-published, which is one more reason to leave `drive_scope` alone unless an existing
-folder makes it necessary — or to use a service account, which none of this applies to.
-
-**"Access blocked: … has not completed the Google verification process"** is Google
-refusing the sign-in, before ytscript sees anything. One of three things:
-
-- The app is still in `Testing` and the account signing in is not on the test-user list.
-  Watch for a browser signed in as somebody other than the project's owner. Add the
-  address under **Audience → Test users**, or publish the app.
-- The app is published and the **Data Access** page lists a sensitive or restricted
-  scope. Production needs the verification review for those. Take the scope off that
-  page — ytscript only ever asks for the one in `drive_scope` — or go back to `Testing`.
-- A Workspace administrator blocks unverified third-party apps outright. Nothing in the
-  Cloud project changes that: on a Workspace you own, user type **Internal** sidesteps
-  verification altogether, and otherwise a service account is the way through.
-
-Save the JSON in the checkout (`drive-credentials.json` is in `.gitignore`), point the
-setting at it, and sign in once:
+Save it in the checkout (`drive-credentials.json` is in `.gitignore`), point the setting
+at it, and sign in once:
 
 ```toml
 drive_upload = true
@@ -357,8 +329,7 @@ ytscript run
 
 `drive-auth` opens the Google sign-in in a browser on the machine it runs on and writes
 the result to `drive_token_file`. Runs after that need no browser: the token refreshes
-itself, which is what makes an unattended `ytscript run` work. It is a live login to
-your Drive, so it is kept at mode 600 and is in `.gitignore`. Delete the file and run
+itself, which is what makes an unattended `ytscript run` work. Delete the file and run
 `drive-auth` again to sign in as someone else.
 
 A run reports what went up:
@@ -380,6 +351,65 @@ Sign-in happens once, before the first download, so a token that has gone stale 
 second rather than a whole backfill. If an upload itself fails, that video counts as
 failed: it is not written to the state file, and the next run transcribes and uploads it
 again.
+
+### Publishing, and the seven-day token
+
+While the app's publishing status is `Testing`, Google hands out refresh tokens that
+stop working after 7 days, so an unattended run dies a week after you authorised it.
+**Audience → Publish app** is what stops that, and it costs nothing: the default
+`drive.file` scope is not a sensitive one, so Google does not put the app through its
+verification review. Leaving it in `Testing` also means listing your own account under
+**Audience → Test users**, since a testing app refuses everyone else; once the app is
+published, that list stops mattering.
+
+Publishing does not rescue a token you already have. The 7 days are stamped on the
+refresh token when it is issued, so a sign-in from before the app was published still
+stops working a week later. Delete `drive_token_file` and run `drive-auth` again.
+
+The wider `drive` scope *is* restricted and does need the verification review before it
+can be published, which is one more reason to leave `drive_scope` alone unless an
+existing folder makes it necessary — or to use a service account, which none of this
+applies to.
+
+### When the sign-in is refused
+
+**"Access blocked: … has not completed the Google verification process"** is Google
+turning the sign-in away, before ytscript sees anything. One of three things:
+
+- The app is still in `Testing` and the account signing in is not on the test-user list.
+  Watch for a browser signed in as somebody other than the project's owner. Add the
+  address under **Audience → Test users**, or publish the app.
+- The app is published and the **Data Access** page lists a sensitive or restricted
+  scope. Production needs the verification review for those. Take the scope off that
+  page — ytscript only ever asks for the one in `drive_scope` — or go back to `Testing`.
+- A Workspace administrator blocks unverified third-party apps outright. Nothing in the
+  Cloud project changes that: on a Workspace you own, user type **Internal** sidesteps
+  verification altogether, and otherwise a service account is the way through.
+
+A **"Google hasn't verified this app"** page is the milder one and not a refusal:
+**Advanced → Go to …** carries on. It is your own app on your own project.
+
+### Who this lets into your Drive
+
+Only you. Publishing is about the consent screen, not about your files: it means any
+Google account may sign in to the app, and each one that does grants access to *its own*
+Drive and gets its own token. There is no shared pool for someone else to reach yours
+through.
+
+What does reach your Drive is `drive_token_file` — that is the file to guard, which is
+why it is written mode 600 and is in `.gitignore`. Anyone holding it can act as ytscript
+on your account until you revoke it. `drive-credentials.json` is much less sensitive: a
+desktop client secret is not a real secret, since anyone can unpack a distributed app to
+find one, and on its own it opens nothing.
+
+Even the token is fenced in by the default `drive.file` scope: ytscript sees the files
+it created and nothing else, so the documents, photos and folders already in your Drive
+are outside what it can read, let alone change. The scripts it uploads are private to
+your account until you share them.
+
+To end it, remove the app under [Google Account → Data & privacy → Third-party apps &
+services][permissions]. The cached token stops working at once, and the local scripts
+stay exactly where they are.
 
 ### Where the files land
 
@@ -511,6 +541,7 @@ demand from the Actions tab:
   `ytscript --help`
 
 [Google Cloud console]: https://console.cloud.google.com/
+[permissions]: https://myaccount.google.com/permissions
 [uv]: https://docs.astral.sh/uv/
 [ruff]: https://docs.astral.sh/ruff/
 [faster-whisper]: https://github.com/SYSTRAN/faster-whisper
