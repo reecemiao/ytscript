@@ -394,8 +394,8 @@ A **"Google hasn't verified this app"** page is the milder one and not a refusal
 Uploads go to `www.googleapis.com`, which is not always reachable directly. ytscript
 uses whatever proxy the rest of the machine uses — `HTTPS_PROXY` and friends first, then
 the Windows registry or the macOS network settings, the same places yt-dlp looks — so a
-setup where downloads already work needs nothing more. `ytscript run -v` says which
-proxy it picked.
+setup where downloads already work needs nothing more. `ytscript -v run` says which
+proxy it picked (`-v` goes before the subcommand).
 
 Only when the machine has none configured is there anything to set:
 
