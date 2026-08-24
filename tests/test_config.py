@@ -125,3 +125,15 @@ def test_members_only_reads_from_file_and_env(tmp_path: Path) -> None:
 
     off = load_config(path=path, env={"YTSCRIPT_INCLUDE_MEMBERS_ONLY": "false"})
     assert off.include_members_only is False
+
+
+def test_retry_settings_are_checked() -> None:
+    with pytest.raises(ConfigError, match="download_retries"):
+        Config(channel="@c", download_retries=-1).validate()
+    with pytest.raises(ConfigError, match="retry_backoff"):
+        Config(channel="@c", retry_backoff=-1.0).validate()
+    with pytest.raises(ConfigError, match="socket_timeout"):
+        Config(channel="@c", socket_timeout=0).validate()
+    with pytest.raises(ConfigError, match="retry_max_attempts"):
+        Config(channel="@c", retry_max_attempts=0).validate()
+    Config(channel="@c", download_retries=0, retry_backoff=0.0).validate()

@@ -6,7 +6,9 @@ import logging
 import tempfile
 from collections.abc import Callable, Iterable
 from contextlib import contextmanager
+from datetime import date
 from pathlib import Path
+from typing import Any
 
 from .config import Config
 from .drive import DriveError, DriveFile, DriveUploader
@@ -42,6 +44,25 @@ def select_videos(videos: Iterable[Video], state: State) -> list[Video]:
     return pending
 
 
+def _parse_date(raw: Any) -> date | None:
+    try:
+        return date.fromisoformat(str(raw))
+    except (TypeError, ValueError):
+        return None
+
+
+def video_from_failure(entry: dict[str, Any]) -> Video:
+    """Rebuild the video a failure record describes, so a retry needs no fresh listing."""
+    video_id = str(entry["id"])
+    return Video(
+        id=video_id,
+        title=str(entry.get("title") or video_id),
+        url=str(entry.get("url") or f"https://www.youtube.com/watch?v={video_id}"),
+        upload_date=_parse_date(entry.get("upload_date")),
+        members_only=bool(entry.get("members_only")),
+    )
+
+
 class Pipeline:
     def __init__(
         self,
@@ -56,6 +77,9 @@ class Pipeline:
             audio_format=config.audio_format,
             cookies_file=config.cookies_file,
             cookies_from_browser=config.cookies_from_browser,
+            retries=config.download_retries,
+            retry_backoff=config.retry_backoff,
+            socket_timeout=config.socket_timeout,
         )
         self._transcriber = transcriber
         self._uploader = uploader
@@ -96,22 +120,39 @@ class Pipeline:
         limit: int | None = None,
         dry_run: bool = False,
         on_progress: Callable[[str], None] | None = None,
+        retry_failed: bool | None = None,
+        only_failed: bool = False,
     ) -> RunReport:
+        """Transcribe what the channel has that the state file does not.
+
+        ``retry_failed`` (``retry_failed`` in the config when left unset) also picks up
+        the videos an earlier run recorded as failed, however old they are.
+        ``only_failed`` does just those, skipping the channel listing entirely, and
+        ignores ``retry_max_attempts``.
+        """
         config = self.config
         state = State.load(config.state_file)
         state.channel = state.channel or config.channel
+        retry = only_failed or (config.retry_failed if retry_failed is None else retry_failed)
 
         if limit is None:
             limit = config.initial_backfill if state.is_empty else config.check_limit
         report = RunReport()
 
-        videos = self.client.latest_videos(config.channel, limit)
+        videos = [] if only_failed else self.client.latest_videos(config.channel, limit)
         report.checked = len(videos)
         if not config.include_members_only:
             report.members_only = [video.id for video in videos if video.members_only]
             videos = [video for video in videos if not video.members_only]
         pending = select_videos(videos, state)
         report.skipped = [video.id for video in videos if state.seen(video.id)]
+
+        if retry:
+            # The failures come first: the oldest stuck video is the one most likely
+            # to fall out of the listing window for good.
+            pending = self._failed_videos(state, report, pending, force=only_failed) + pending
+        if only_failed:
+            report.checked = len(pending)
 
         if not pending:
             return report
@@ -134,6 +175,17 @@ class Pipeline:
                 except (YouTubeError, TranscriptionError, DriveError) as exc:
                     log.warning("%s failed: %s", video.id, exc)
                     report.failed.append((video.id, str(exc)))
+                    # Written down so a later run can pick it up again, even once the
+                    # video is older than check_limit: see run(retry_failed=True).
+                    state.record_failure(
+                        video.id,
+                        str(exc),
+                        title=video.title,
+                        url=video.url,
+                        upload_date=video.upload_date.isoformat() if video.upload_date else None,
+                        members_only=video.members_only or None,
+                    )
+                    state.save()
                     continue
                 report.written.extend(str(path) for path in paths)
                 report.uploaded.extend(str(upload) for upload in uploads)
@@ -150,6 +202,32 @@ class Pipeline:
                 # Saved per video so an interrupted backfill does not redo work.
                 state.save()
         return report
+
+    def _failed_videos(
+        self, state: State, report: RunReport, already: list[Video], force: bool
+    ) -> list[Video]:
+        """The videos on the failure list that this run should try again."""
+        config = self.config
+        cap = None if force else config.retry_max_attempts
+        known = {video.id for video in already}
+        pending: list[Video] = []
+        for entry in state.failed_videos(max_attempts=cap):
+            # One still inside the listing window is already lined up for its turn.
+            if entry["id"] in known:
+                continue
+            video = video_from_failure(entry)
+            if video.members_only and not config.include_members_only:
+                report.members_only.append(video.id)
+                continue
+            pending.append(video)
+            report.retried.append(video.id)
+        if cap is not None:
+            report.given_up = [
+                entry["id"]
+                for entry in state.failed_videos()
+                if int(entry.get("attempts", 0)) >= cap
+            ]
+        return pending
 
     def _process(self, video: Video, audio_dir: Path) -> tuple[list[Path], list[DriveFile]]:
         config = self.config

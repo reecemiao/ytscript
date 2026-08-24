@@ -2,12 +2,19 @@
 
 from __future__ import annotations
 
+import logging
 import re
+import time
+from collections.abc import Callable, Iterator
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 from .models import Video
+
+log = logging.getLogger("ytscript")
+
+T = TypeVar("T")
 
 _CHANNEL_ID = re.compile(r"^UC[\w-]{22}$")
 _WATCH_URL = "https://www.youtube.com/watch?v={id}"
@@ -18,6 +25,33 @@ MEMBERS_ONLY_AVAILABILITY = "subscriber_only"
 
 # What YouTube says when the request is not signed in as a member of the channel.
 _MEMBERS_ONLY_ERRORS = ("members-only", "members only", "join this channel")
+
+# Network trouble that another attempt can get past. Matched against the whole
+# exception chain in lower case, so a localised OS message ("远程主机强迫关闭了一个现有
+# 的连接。") is still caught by the English class name Python wraps it in.
+_TRANSIENT_HINTS = (
+    "connection aborted",
+    "connection reset",
+    "connectionreseterror",
+    "connection broken",
+    "connection refused",
+    "connectionerror",
+    "remote end closed connection",
+    "incompleteread",
+    "timed out",
+    "timeout",
+    "temporary failure in name resolution",
+    "unable to download webpage",
+    "unable to download api page",
+    "giving up after",
+    "content too short",
+    "http error 429",
+    "http error 500",
+    "http error 502",
+    "http error 503",
+    "http error 504",
+    "eof occurred in violation of protocol",
+)
 
 _MEMBERSHIP_HINT = (
     "sign in as a member: set cookies_file (a cookies.txt export) or "
@@ -37,6 +71,38 @@ _BROWSER_SPEC = re.compile(
 
 class YouTubeError(RuntimeError):
     """Raised when yt-dlp cannot list a channel or fetch a video."""
+
+    def __init__(self, message: str, *, transient: bool = False) -> None:
+        super().__init__(message)
+        self.transient = transient
+        """Whether the same call has a fair chance of working on another try."""
+
+
+def _causes(exc: BaseException) -> Iterator[BaseException]:
+    """Walk an exception and everything it was raised from."""
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        yield current
+        current = current.__cause__ or current.__context__
+
+
+def is_transient(exc: BaseException) -> bool:
+    """Whether ``exc`` looks like network trouble rather than a refusal.
+
+    A dropped connection mid-download is the common one:
+    ``('Connection aborted.', ConnectionResetError(10054, ...))``.
+    """
+    for error in _causes(exc):
+        if isinstance(error, ConnectionError | TimeoutError):
+            return True
+        if isinstance(error, OSError) and error.errno in (54, 60, 104, 110, 10054, 10060):
+            return True
+        lowered = str(error).lower()
+        if any(hint in lowered for hint in _TRANSIENT_HINTS):
+            return True
+    return False
 
 
 def _load_yt_dlp() -> Any:
@@ -136,11 +202,23 @@ class YouTubeClient:
         cookies_file: Path | None = None,
         cookies_from_browser: str | None = None,
         quiet: bool = True,
+        retries: int = 3,
+        retry_backoff: float = 5.0,
+        socket_timeout: float = 30.0,
+        sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         self.audio_format = audio_format
         self.cookies_file = cookies_file
         self.cookies_from_browser = cookies_from_browser
         self.quiet = quiet
+        self.retries = max(0, retries)
+        """Extra attempts a request gets after network trouble; 0 means one try only."""
+
+        self.retry_backoff = max(0.0, retry_backoff)
+        """Seconds before the second attempt; each further wait doubles it."""
+
+        self.socket_timeout = socket_timeout
+        self._sleep = sleep
 
     @property
     def signed_in(self) -> bool:
@@ -153,6 +231,13 @@ class YouTubeClient:
             "no_warnings": self.quiet,
             "noprogress": self.quiet,
             "ignoreerrors": False,
+            # yt-dlp's own retries come first: they resume a half-downloaded file
+            # from its .part, where our outer retry starts the request again.
+            "retries": self.retries,
+            "fragment_retries": self.retries,
+            "extractor_retries": self.retries,
+            "socket_timeout": self.socket_timeout,
+            "continuedl": True,
         }
         if self.cookies_file:
             opts["cookiefile"] = str(self.cookies_file)
@@ -160,8 +245,31 @@ class YouTubeClient:
             opts["cookiesfrombrowser"] = parse_browser_spec(self.cookies_from_browser)
         return opts
 
+    def _attempt(self, what: str, call: Callable[[], T]) -> T:
+        """Run ``call``, giving it another go while the failure looks like network trouble."""
+        for attempt in range(1, self.retries + 2):
+            try:
+                return call()
+            except YouTubeError as exc:
+                if not exc.transient or attempt > self.retries:
+                    raise
+                delay = self.retry_backoff * 2 ** (attempt - 1)
+                log.warning(
+                    "%s failed (attempt %d of %d): %s; retrying in %.0fs",
+                    what,
+                    attempt,
+                    self.retries + 1,
+                    exc,
+                    delay,
+                )
+                self._sleep(delay)
+        raise AssertionError("unreachable")  # pragma: no cover
+
     def latest_videos(self, channel: str, limit: int) -> list[Video]:
         """Return up to ``limit`` of the channel's newest uploads, newest first."""
+        return self._attempt(f"listing {channel}", lambda: self._list_videos_once(channel, limit))
+
+    def _list_videos_once(self, channel: str, limit: int) -> list[Video]:
         yt_dlp = _load_yt_dlp()
         url = channel_uploads_url(channel)
         opts = self._base_opts() | {
@@ -173,14 +281,25 @@ class YouTubeClient:
             with yt_dlp.YoutubeDL(opts) as ydl:
                 info = ydl.extract_info(url, download=False)
         except Exception as exc:  # yt-dlp raises a family of DownloadError subclasses
-            raise YouTubeError(f"could not list videos for {channel!r}: {exc}") from exc
+            raise YouTubeError(
+                f"could not list videos for {channel!r}: {exc}", transient=is_transient(exc)
+            ) from exc
 
         entries = list(_iter_entries(info))
         videos = [_to_video(entry) for entry in entries if entry.get("id")]
         return videos[:limit]
 
     def download_audio(self, video: Video, dest_dir: Path) -> tuple[Path, Video]:
-        """Download the audio track and return its path plus enriched metadata."""
+        """Download the audio track and return its path plus enriched metadata.
+
+        A connection dropped mid-download is retried with a widening pause; yt-dlp
+        picks the file up from the part it already has.
+        """
+        return self._attempt(
+            f"downloading {video.id}", lambda: self._download_audio_once(video, dest_dir)
+        )
+
+    def _download_audio_once(self, video: Video, dest_dir: Path) -> tuple[Path, Video]:
         yt_dlp = _load_yt_dlp()
         dest_dir = Path(dest_dir)
         dest_dir.mkdir(parents=True, exist_ok=True)
@@ -200,7 +319,9 @@ class YouTubeClient:
             if _mentions_membership(str(exc)):
                 # A listing without badges (or a video made members-only later) lands here.
                 raise YouTubeError(f"{video.id} is members-only; {_MEMBERSHIP_HINT}") from exc
-            raise YouTubeError(f"could not download audio for {video.id}: {exc}") from exc
+            raise YouTubeError(
+                f"could not download audio for {video.id}: {exc}", transient=is_transient(exc)
+            ) from exc
 
         if not path.is_file():
             matches = sorted(dest_dir.glob(f"{video.id}.*"))

@@ -12,6 +12,7 @@ from .drive import DriveError, DriveUploader
 from .models import RunReport
 from .pipeline import Pipeline
 from .polish import polish_text
+from .state import State
 from .vocabulary import VocabularyError, load_vocabulary
 from .youtube import YouTubeError
 
@@ -110,6 +111,33 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="ID_OR_URL",
         help="Google Drive folder the scripts go into",
     )
+    retry = run.add_mutually_exclusive_group()
+    retry.add_argument(
+        "--retry-failed",
+        dest="retry_failed",
+        action="store_true",
+        default=None,
+        help="also re-attempt videos an earlier run could not finish, however old they are",
+    )
+    retry.add_argument(
+        "--no-retry-failed",
+        dest="retry_failed",
+        action="store_false",
+        default=None,
+        help="only look at the newest videos (the default)",
+    )
+    retry.add_argument(
+        "--only-failed",
+        action="store_true",
+        help="re-attempt just those, skipping the channel listing and the attempt limit",
+    )
+    run.add_argument(
+        "--retries",
+        dest="download_retries",
+        type=int,
+        metavar="N",
+        help="extra attempts a download gets when the connection drops (default 3)",
+    )
     run.add_argument("--keep-audio", dest="keep_audio", action="store_true", default=None)
     run.add_argument("--state-file", dest="state_file", type=Path)
     run.add_argument(
@@ -147,6 +175,19 @@ def build_parser() -> argparse.ArgumentParser:
     add_common(listing)
     listing.add_argument("--limit", type=int, default=10)
 
+    failures = sub.add_parser(
+        "failures",
+        help="show the videos an earlier run could not finish",
+    )
+    failures.add_argument("--state-file", dest="state_file", type=Path)
+    failures.add_argument(
+        "--clear",
+        nargs="*",
+        metavar="ID",
+        default=None,
+        help="forget these failures, or all of them when given no id",
+    )
+
     sub.add_parser(
         "drive-auth",
         help="sign in to Google Drive once and cache the token for later runs",
@@ -162,6 +203,8 @@ def build_parser() -> argparse.ArgumentParser:
 _OVERRIDE_FIELDS = (
     "channel",
     "language",
+    "retry_failed",
+    "download_retries",
     "backend",
     "whisper_model",
     "whisper_batch_size",
@@ -192,6 +235,13 @@ def _config_from_args(args: argparse.Namespace) -> Config:
 
 def _print_report(report: RunReport, dry_run: bool) -> None:
     print(f"checked {report.checked} video(s); {len(report.skipped)} already had a script")
+    if report.retried:
+        print(f"picked {len(report.retried)} video(s) back up from the failure list")
+    if report.given_up:
+        print(
+            f"left {len(report.given_up)} failed video(s) alone after retry_max_attempts; "
+            "'ytscript run --only-failed' tries them anyway"
+        )
     if report.members_only:
         print(
             f"skipped {len(report.members_only)} members-only video(s); "
@@ -212,6 +262,12 @@ def _print_report(report: RunReport, dry_run: bool) -> None:
             print(f"  {item}")
     for video_id, error in report.failed:
         print(f"  failed: {video_id}: {error}", file=sys.stderr)
+    if report.failed and not dry_run:
+        print(
+            f"{len(report.failed)} failure(s) recorded; "
+            "'ytscript run --retry-failed' takes another run at them",
+            file=sys.stderr,
+        )
 
 
 def cmd_run(args: argparse.Namespace) -> int:
@@ -224,6 +280,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         limit=limit,
         dry_run=args.dry_run,
         on_progress=lambda label: print(label, flush=True),
+        only_failed=args.only_failed,
     )
     _print_report(report, args.dry_run)
     return 1 if report.failed else 0
@@ -293,6 +350,35 @@ def cmd_polish(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_failures(args: argparse.Namespace) -> int:
+    # No channel is needed to read the state file.
+    overrides = {"state_file": args.state_file} if args.state_file else {}
+    config = load_config(path=args.config, overrides=overrides)
+    state = State.load(config.state_file)
+
+    if args.clear is not None:
+        dropped = state.forget_failures(args.clear or None)
+        if dropped:
+            state.save()
+        print(f"forgot {len(dropped)} failure(s)")
+        for video_id in dropped:
+            print(f"  {video_id}")
+        return 0
+
+    entries = state.failed_videos()
+    if not entries:
+        print("no failures on record")
+        return 0
+    print(f"{len(entries)} video(s) failed; 'ytscript run --retry-failed' tries them again:")
+    for entry in entries:
+        attempts = entry.get("attempts", 1)
+        when = entry.get("last_failed_at", "")
+        title = entry.get("title", "")
+        print(f"  {entry['id']}  {attempts} attempt(s)  {when}  {title}")
+        print(f"      {entry.get('error', '')}")
+    return 0
+
+
 def cmd_drive_auth(args: argparse.Namespace) -> int:
     # No channel is needed to authorise, so this skips the usual validation.
     config = load_config(path=args.config)
@@ -334,6 +420,7 @@ def main(argv: list[str] | None = None) -> int:
         "run": cmd_run,
         "list": cmd_list,
         "polish": cmd_polish,
+        "failures": cmd_failures,
         "init": cmd_init,
         "drive-auth": cmd_drive_auth,
     }

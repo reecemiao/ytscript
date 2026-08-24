@@ -39,6 +39,28 @@ class Config:
     check_limit: int = 5
     """Newest videos inspected on later runs; unseen ones get transcribed."""
 
+    # --- when something goes wrong ---------------------------------------
+    download_retries: int = 3
+    """Extra attempts a YouTube request gets when the connection drops. ``0`` means one try.
+
+    This is the fix for ``('Connection aborted.', ConnectionResetError(10054, ...))``
+    and its friends: the download starts again and yt-dlp resumes the part it has."""
+
+    retry_backoff: float = 5.0
+    """Seconds before the second attempt; each further wait doubles it (5, 10, 20...)."""
+
+    socket_timeout: float = 30.0
+    """Seconds a stalled connection is given before it counts as a failed attempt."""
+
+    retry_failed: bool = False
+    """Also re-attempt the videos recorded as failed, even when they have fallen out of
+    the ``check_limit`` window. ``--retry-failed`` turns it on for a single run."""
+
+    retry_max_attempts: int = 3
+    """How many times a failed video is picked up again before it is left alone.
+    ``ytscript run --only-failed`` retries it regardless, and ``ytscript failures --clear``
+    starts the count over."""
+
     # --- speech-to-text -------------------------------------------------
     backend: str = "faster-whisper"
     whisper_model: str = "large-v3"
@@ -176,6 +198,14 @@ class Config:
             raise ConfigError("check_limit must be at least 1")
         if self.whisper_batch_size < 1:
             raise ConfigError("whisper_batch_size must be at least 1 (1 turns batching off)")
+        if self.download_retries < 0:
+            raise ConfigError("download_retries cannot be negative (0 means one attempt)")
+        if self.retry_backoff < 0:
+            raise ConfigError("retry_backoff cannot be negative")
+        if self.socket_timeout <= 0:
+            raise ConfigError("socket_timeout must be greater than 0")
+        if self.retry_max_attempts < 1:
+            raise ConfigError("retry_max_attempts must be at least 1")
         # Reading the file now means a typo fails the command, not the first video.
         try:
             load_vocabulary(self.vocabulary)
@@ -303,6 +333,19 @@ language = "zh"
 # look at the newest `check_limit` and pick up whatever is not in the state file.
 initial_backfill = 30
 check_limit = 5
+
+# A dropped connection mid-download ("Connection aborted", ConnectionResetError) is
+# retried this many extra times, waiting 5s, then 10s, then 20s between attempts.
+download_retries = 3
+retry_backoff = 5.0
+socket_timeout = 30.0
+
+# A video that still fails is written to the state file's "failures" list. Turn this
+# on to re-attempt those on every run, even once they are older than `check_limit`;
+# `ytscript run --retry-failed` does it for one run, and `ytscript failures` shows
+# what is on the list. Each one is picked up at most `retry_max_attempts` times.
+retry_failed = false
+retry_max_attempts = 3
 
 # "faster-whisper" runs locally, "openai" calls the hosted transcription API.
 backend = "faster-whisper"

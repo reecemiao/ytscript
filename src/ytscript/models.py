@@ -81,5 +81,11 @@ class RunReport:
     members_only: list[str] = field(default_factory=list)
     """Videos passed over because ``include_members_only`` is off."""
 
+    retried: list[str] = field(default_factory=list)
+    """Videos brought back from the state file's failure list, outside the usual window."""
+
+    given_up: list[str] = field(default_factory=list)
+    """Failures left alone because they have already had ``retry_max_attempts`` goes."""
+
     uploaded: list[str] = field(default_factory=list)
     """Scripts copied into Google Drive, as ``name  link``. Empty unless ``drive_upload`` is on."""
