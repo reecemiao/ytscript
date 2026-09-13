@@ -111,6 +111,21 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="ID_OR_URL",
         help="Google Drive folder the scripts go into",
     )
+    catch_up = run.add_mutually_exclusive_group()
+    catch_up.add_argument(
+        "--catch-up",
+        dest="catch_up",
+        action="store_true",
+        default=None,
+        help="list back past check_limit until reaching a video the last run handled",
+    )
+    catch_up.add_argument(
+        "--no-catch-up",
+        dest="catch_up",
+        action="store_false",
+        default=None,
+        help="only look at the newest check_limit videos (the default)",
+    )
     retry = run.add_mutually_exclusive_group()
     retry.add_argument(
         "--retry-failed",
@@ -204,6 +219,7 @@ _OVERRIDE_FIELDS = (
     "channel",
     "language",
     "retry_failed",
+    "catch_up",
     "download_retries",
     "backend",
     "whisper_model",
@@ -235,6 +251,11 @@ def _config_from_args(args: argparse.Namespace) -> Config:
 
 def _print_report(report: RunReport, dry_run: bool) -> None:
     print(f"checked {report.checked} video(s); {len(report.skipped)} already had a script")
+    if report.catch_up_capped:
+        print(
+            "catch-up stopped at catch_up_limit before reaching a video from an earlier run; "
+            "raise catch_up_limit if the channel has uploaded more than that"
+        )
     if report.retried:
         print(f"picked {len(report.retried)} video(s) back up from the failure list")
     if report.given_up:

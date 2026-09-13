@@ -307,6 +307,22 @@ def test_run_retry_failed_flag_adds_them_to_the_usual_window(
     assert State.load(project / "state.json").failures  # left where it was
 
 
+def test_run_catch_up_flag_lists_back_to_the_last_run(
+    project: Path, fake_pipeline, capsys: pytest.CaptureFixture
+) -> None:
+    assert cli.main(["run"]) == 0
+    fake_pipeline.videos = make_videos(4, start=100) + fake_pipeline.videos
+
+    assert cli.main(["run", "--catch-up"]) == 0
+    # 2 and 4 hold only new uploads; 8 reaches back to what the first run did.
+    assert [limit for _, limit in fake_pipeline.listed[1:]] == [2, 4, 8]
+    assert {"vid100", "vid101", "vid102", "vid103"} <= set(fake_pipeline.downloaded)
+
+    capsys.readouterr()
+    assert cli.main(["run", "--no-catch-up"]) == 0
+    assert fake_pipeline.listed[-1] == ("@testchannel", 2)
+
+
 def test_failures_lists_and_clears_the_record(project: Path, capsys: pytest.CaptureFixture) -> None:
     assert cli.main(["failures"]) == 0
     assert "no failures on record" in capsys.readouterr().out

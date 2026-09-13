@@ -68,6 +68,70 @@ def test_later_runs_only_check_the_newest_few(tmp_path: Path) -> None:
     assert any("vid003" in path for path in report.written)
 
 
+def test_catch_up_lists_back_to_the_last_run(tmp_path: Path) -> None:
+    videos = make_videos(3)
+    pipeline, client, _ = build(tmp_path, videos, initial_backfill=3, check_limit=2)
+    pipeline.run()
+
+    # Five uploads since the last run: more than a two-video window can see.
+    fresh = make_videos(5, start=100)
+    client.videos = fresh + videos
+    plain = pipeline.run(dry_run=True)
+    assert len(plain.written) == 2
+
+    report = pipeline.run(catch_up=True)
+    # 2 -> 4 -> 8, and the eight-video listing reaches vid000.
+    assert [limit for _, limit in client.listed[-3:]] == [2, 4, 8]
+    assert len(report.written) == 5
+    assert report.skipped == ["vid000", "vid001", "vid002"]
+    assert not report.catch_up_capped
+
+
+def test_catch_up_stops_at_the_first_listing_that_knows_a_video(tmp_path: Path) -> None:
+    videos = make_videos(3)
+    pipeline, client, _ = build(tmp_path, videos, initial_backfill=3, check_limit=2, catch_up=True)
+    pipeline.run()
+    client.videos = make_videos(1, start=100) + videos
+
+    report = pipeline.run()
+    assert client.listed[-1] == ("@testchannel", 2)
+    assert len(report.written) == 1
+
+
+def test_catch_up_counts_a_recorded_failure_as_known(tmp_path: Path) -> None:
+    videos = make_videos(2)
+    client = FakeYouTubeClient(videos)
+    config = make_config(tmp_path, initial_backfill=2, check_limit=1, catch_up=True)
+    Pipeline(config, client=client, transcriber=FakeTranscriber(fail_on={"vid000"})).run()
+    client.videos = make_videos(1, start=100) + videos
+
+    Pipeline(config, client=client, transcriber=FakeTranscriber()).run(dry_run=True)
+    assert client.listed[-2:] == [("@testchannel", 1), ("@testchannel", 2)]
+
+
+def test_catch_up_gives_up_at_catch_up_limit(tmp_path: Path) -> None:
+    pipeline, client, _ = build(
+        tmp_path, make_videos(1), initial_backfill=1, check_limit=2, catch_up_limit=5
+    )
+    pipeline.run()
+    client.videos = make_videos(20, start=100)
+
+    report = pipeline.run(catch_up=True, dry_run=True)
+    assert [limit for _, limit in client.listed[1:]] == [2, 4, 5]
+    assert report.catch_up_capped and len(report.written) == 5
+
+
+def test_catch_up_leaves_the_first_run_and_an_explicit_limit_alone(tmp_path: Path) -> None:
+    pipeline, client, _ = build(tmp_path, make_videos(10), initial_backfill=3, catch_up=True)
+    pipeline.run(dry_run=True)
+    assert client.listed == [("@testchannel", 3)]
+
+    pipeline.run()
+    client.videos = make_videos(10, start=100) + client.videos
+    pipeline.run(limit=4, dry_run=True)
+    assert client.listed[-1] == ("@testchannel", 4)
+
+
 def test_run_with_nothing_new_writes_nothing(tmp_path: Path) -> None:
     pipeline, _, transcriber = build(tmp_path, make_videos(2), initial_backfill=2)
     pipeline.run()

@@ -103,6 +103,7 @@ Useful flags on `run`:
 | `--vocabulary NAME` | Terms and rewrites for the channel: a built-in name or a file |
 | `--limit N` | Check the newest N videos, whatever the state file says |
 | `--backfill` | Check `initial_backfill` videos again (default 30) |
+| `--catch-up` | List back past `check_limit` until reaching a video the last run handled |
 | `--format txt,md,json` | Write more than one rendering |
 | `--timestamps` | Prefix each paragraph with `[hh:mm:ss]` |
 | `--dry-run` | List what is missing without downloading anything |
@@ -140,6 +141,8 @@ language = "zh"              # main spoken language, ISO 639-1; "auto" to detect
 
 initial_backfill = 30        # videos transcribed on the very first run
 check_limit = 5              # videos inspected on later runs
+catch_up = false             # list further back until a video the last run handled
+catch_up_limit = 100         # the furthest back catch_up goes
 
 download_retries = 3         # extra attempts when the connection drops; 0 means one try
 retry_backoff = 5.0          # seconds before the second attempt, doubling after that
@@ -183,6 +186,14 @@ drive_scope = "drive.file"         # or "drive", for a folder ytscript did not c
 # cookies_from_browser = "firefox"    # BROWSER[+KEYRING][:PROFILE][::CONTAINER]
 include_members_only = false          # true also transcribes members-only videos
 ```
+
+A later run only checks the newest `check_limit` videos, so a channel that uploads more
+than that between runs leaves the rest behind. With `catch_up = true` (or `--catch-up`
+for one run) the listing starts at `check_limit` and doubles until it takes in a video
+the state file already knows — transcribed or on the failure list — so everything
+uploaded since the last run is picked up. It stops at `catch_up_limit` and says so if it
+never finds one. An explicit `--limit` or `--backfill` overrules it, and the first run
+still uses `initial_backfill`. It combines with `--retry-failed`.
 
 Every key has a matching environment variable: `YTSCRIPT_CHANNEL`,
 `YTSCRIPT_LANGUAGE`, `YTSCRIPT_BACKEND`, and so on.

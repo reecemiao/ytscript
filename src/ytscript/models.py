@@ -84,6 +84,9 @@ class RunReport:
     retried: list[str] = field(default_factory=list)
     """Videos brought back from the state file's failure list, outside the usual window."""
 
+    catch_up_capped: bool = False
+    """``catch_up`` listed ``catch_up_limit`` videos without reaching one it knew."""
+
     given_up: list[str] = field(default_factory=list)
     """Failures left alone because they have already had ``retry_max_attempts`` goes."""
 
