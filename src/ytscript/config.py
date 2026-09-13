@@ -39,6 +39,15 @@ class Config:
     check_limit: int = 5
     """Newest videos inspected on later runs; unseen ones get transcribed."""
 
+    catch_up: bool = False
+    """Widen the listing past ``check_limit`` until it reaches a video an earlier run
+    already knows, so nothing uploaded since the last run is missed however many there
+    are. ``--catch-up`` turns it on for a single run."""
+
+    catch_up_limit: int = 100
+    """The furthest back ``catch_up`` lists, for a state file that shares nothing with
+    the channel (a different channel, or one last run a very long time ago)."""
+
     # --- when something goes wrong ---------------------------------------
     download_retries: int = 3
     """Extra attempts a YouTube request gets when the connection drops. ``0`` means one try.
@@ -196,6 +205,8 @@ class Config:
             raise ConfigError("initial_backfill must be at least 1")
         if self.check_limit < 1:
             raise ConfigError("check_limit must be at least 1")
+        if self.catch_up_limit < 1:
+            raise ConfigError("catch_up_limit must be at least 1")
         if self.whisper_batch_size < 1:
             raise ConfigError("whisper_batch_size must be at least 1 (1 turns batching off)")
         if self.download_retries < 0:
@@ -333,6 +344,13 @@ language = "zh"
 # look at the newest `check_limit` and pick up whatever is not in the state file.
 initial_backfill = 30
 check_limit = 5
+
+# A channel that uploads more than `check_limit` videos between runs would leave
+# some behind. Turn this on to keep listing further back until the run reaches a
+# video it already knows, up to `catch_up_limit`; `ytscript run --catch-up` does it
+# for one run.
+catch_up = false
+catch_up_limit = 100
 
 # A dropped connection mid-download ("Connection aborted", ConnectionResetError) is
 # retried this many extra times, waiting 5s, then 10s, then 20s between attempts.

@@ -122,24 +122,32 @@ class Pipeline:
         on_progress: Callable[[str], None] | None = None,
         retry_failed: bool | None = None,
         only_failed: bool = False,
+        catch_up: bool | None = None,
     ) -> RunReport:
         """Transcribe what the channel has that the state file does not.
 
         ``retry_failed`` (``retry_failed`` in the config when left unset) also picks up
         the videos an earlier run recorded as failed, however old they are.
         ``only_failed`` does just those, skipping the channel listing entirely, and
-        ignores ``retry_max_attempts``.
+        ignores ``retry_max_attempts``. ``catch_up`` (``catch_up`` in the config when
+        left unset) lists back as far as the last run reached instead of stopping at
+        ``check_limit``; an explicit ``limit`` overrules it.
         """
         config = self.config
         state = State.load(config.state_file)
         state.channel = state.channel or config.channel
         retry = only_failed or (config.retry_failed if retry_failed is None else retry_failed)
-
-        if limit is None:
-            limit = config.initial_backfill if state.is_empty else config.check_limit
+        catch_up = config.catch_up if catch_up is None else catch_up
         report = RunReport()
 
-        videos = [] if only_failed else self.client.latest_videos(config.channel, limit)
+        if only_failed:
+            videos = []
+        elif limit is None and catch_up and not state.is_empty:
+            videos = self._list_since_last_run(state, report)
+        else:
+            if limit is None:
+                limit = config.initial_backfill if state.is_empty else config.check_limit
+            videos = self.client.latest_videos(config.channel, limit)
         report.checked = len(videos)
         if not config.include_members_only:
             report.members_only = [video.id for video in videos if video.members_only]
@@ -202,6 +210,31 @@ class Pipeline:
                 # Saved per video so an interrupted backfill does not redo work.
                 state.save()
         return report
+
+    def _list_since_last_run(self, state: State, report: RunReport) -> list[Video]:
+        """The newest videos, reaching back at least to one an earlier run already handled.
+
+        Starts at ``check_limit`` and doubles the listing until it takes in a video the
+        state file knows (done or failed), the channel runs out, or ``catch_up_limit``
+        is reached. The whole listing is returned, so this never checks less than a
+        plain run would.
+        """
+        config = self.config
+        count = config.check_limit
+        while True:
+            videos = self.client.latest_videos(config.channel, count)
+            if any(state.seen(video.id) or video.id in state.failures for video in videos):
+                return videos
+            if len(videos) < count:
+                return videos  # the whole channel is newer than the last run
+            if count >= config.catch_up_limit:
+                log.warning(
+                    "catch-up listed %d video(s) without reaching one from an earlier run",
+                    len(videos),
+                )
+                report.catch_up_capped = True
+                return videos
+            count = min(count * 2, config.catch_up_limit)
 
     def _failed_videos(
         self, state: State, report: RunReport, already: list[Video], force: bool
