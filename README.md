@@ -93,6 +93,10 @@ fails is not recorded as done — it goes on the state file's failure list inste
 has scrolled out of the `check_limit` window. See [When a download
 drops](#when-a-download-drops).
 
+TXT and Markdown outputs include the full video description before the transcript,
+when available, preserving its line breaks and links. JSON includes it as
+`video.description` (`null` when unavailable).
+
 Useful flags on `run`:
 
 | Flag | Effect |

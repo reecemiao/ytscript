@@ -79,6 +79,8 @@ def render_txt(transcript: Transcript, timestamps: bool = False, gap: float = 2.
         f"[{format_timestamp(start)}] {text}" if timestamps else text
         for start, text in group_paragraphs(transcript.segments, gap)
     ]
+    if video.description and video.description.strip():
+        body = ["Video description:\n" + video.description, "Transcript:", *body]
     return "\n".join(header) + "\n\n" + "\n\n".join(body) + "\n"
 
 
@@ -97,6 +99,9 @@ def render_md(transcript: Transcript, timestamps: bool = False, gap: float = 2.0
     if transcript.backend:
         lines.append(f"- **Transcribed with:** {transcript.backend}")
     lines.append("")
+
+    if video.description and video.description.strip():
+        lines.extend(["## Video description", "", video.description, "", "## Transcript", ""])
 
     for start, text in group_paragraphs(transcript.segments, gap):
         if timestamps:
@@ -117,6 +122,7 @@ def render_json(transcript: Transcript, timestamps: bool = False, gap: float = 2
             "channel": video.channel,
             "upload_date": video.upload_date.isoformat() if video.upload_date else None,
             "duration": video.duration,
+            "description": video.description,
         },
         "language": transcript.language,
         "backend": transcript.backend,
