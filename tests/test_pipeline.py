@@ -365,12 +365,14 @@ def test_members_only_videos_are_taken_when_signed_in(tmp_path: Path) -> None:
     assert sorted(client.downloaded) == ["vid000", "vid001", "vid002"]
 
 
-def test_the_video_primes_the_model_with_its_own_title(tmp_path: Path) -> None:
-    videos = make_videos(1)
-    _, _, transcriber = build(tmp_path, videos)
-    pipeline, _, transcriber = build(tmp_path, videos, language="zh")
+def test_the_video_primes_the_model_with_its_hashtags(tmp_path: Path) -> None:
+    videos = [replace(make_videos(1)[0], description="Ignored description\n#AVGO #TSM")]
+    pipeline, _, transcriber = build(tmp_path, videos, whisper_initial_prompt="Seed.")
     pipeline.run()
-    assert transcriber.prompts == ["以下是普通话的句子。Episode 0"]
+    assert transcriber.prompts == ["Seed.#AVGO #TSM"]
+    written = next((tmp_path / "scripts").glob("*.txt")).read_text(encoding="utf-8")
+    assert "Hashtags: #AVGO #TSM" in written
+    assert "Ignored description" not in written
 
 
 def test_the_vocabulary_joins_the_prompt_and_fixes_the_text(tmp_path: Path) -> None:
@@ -391,7 +393,10 @@ def test_the_vocabulary_joins_the_prompt_and_fixes_the_text(tmp_path: Path) -> N
 
 def test_metadata_priming_can_be_turned_off(tmp_path: Path) -> None:
     pipeline, _, transcriber = build(
-        tmp_path, make_videos(1), language="zh", prompt_from_metadata=False
+        tmp_path,
+        [replace(make_videos(1)[0], description="#AVGO")],
+        language="zh",
+        prompt_from_metadata=False,
     )
     pipeline.run()
     assert transcriber.prompts == ["以下是普通话的句子。"]

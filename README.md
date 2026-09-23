@@ -93,9 +93,10 @@ fails is not recorded as done — it goes on the state file's failure list inste
 has scrolled out of the `check_limit` window. See [When a download
 drops](#when-a-download-drops).
 
-TXT and Markdown outputs include the full video description before the transcript,
-when available, preserving its line breaks and links. JSON includes it as
-`video.description` (`null` when unavailable).
+TXT and Markdown outputs include the video's `#hashtags` before the transcript,
+when available. Tags are extracted from the title and description, with duplicates
+removed in order. The video description is omitted from every output format.
+JSON includes `video.hashtags` (an empty list when no hashtags are available).
 
 Useful flags on `run`:
 
@@ -162,7 +163,7 @@ whisper_initial_prompt = "以下是普通话的句子。"   # seeds simplified c
 whisper_batch_size = 4       # clips decoded at once; 1 turns batching off
 whisper_condition_on_previous_text = false   # false stops the model looping a phrase
 
-prompt_from_metadata = true  # prime each video with its own title and description
+prompt_from_metadata = true  # prime each video with its own hashtags
 vocabulary = "zh-finance"    # terms and rewrites; a built-in name or a file path
 
 output_dir = "scripts"
@@ -351,10 +352,10 @@ sounds: 费半 (a Mandarin nickname for the Philadelphia semiconductor index) co
 
 Three settings work on this, and they stack:
 
-- **`prompt_from_metadata`** (on by default) puts the video's own title and the first
-  line of its description in front of the model as the transcript so far. A title like
-  `半导体、ASML、TSM、NFLX、ISRG、MU、SNDK` names most of the day's tickers before a word
-  of audio is decoded, and it costs nothing — the metadata is already downloaded.
+- **`prompt_from_metadata`** (on by default) primes the model with `#hashtags`
+  extracted from the video's title and description, such as `#ASML #TSM #NVDA`.
+  Ordinary title and description text is excluded. Without hashtags, only the
+  configured language seed and vocabulary are used.
 - **`vocabulary`** adds the terms the channel says every episode, and rewrites what the
   model gets wrong anyway. `"zh-finance"` ships with ytscript for a Mandarin US-market
   channel; the file is small, commented and meant to be copied:

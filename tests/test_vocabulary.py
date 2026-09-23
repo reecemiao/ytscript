@@ -48,27 +48,41 @@ def test_chinese_corrections_match_inside_a_run_of_characters() -> None:
     assert vocabulary.correct("今天飞班收跌") == "今天费半收跌"
 
 
-def test_prompt_leads_with_the_seed_and_the_video_title() -> None:
-    vocabulary = parse_vocabulary("NVDA\n对冲基金")
-    prompt = vocabulary.prompt(make_video(), seed="以下是普通话的句子。")
+def test_prompt_leads_with_seed_and_hashtags() -> None:
+    vocabulary = parse_vocabulary("NVDA\nhedge fund")
+    video = make_video(title="Ordinary title #AVGO", description="Ignored prose\n#TSM")
+    prompt = vocabulary.prompt(video, seed="Seed. ")
     assert prompt is not None
-    assert prompt.startswith("以下是普通话的句子。美股 半导体 AVGO")
-    assert "对冲基金" in prompt
+    assert prompt.startswith("Seed.#AVGO #TSM")
+    assert "hedge fund" in prompt
+    assert "Ordinary title" not in prompt
+    assert "Ignored prose" not in prompt
 
 
-def test_prompt_takes_the_first_line_of_the_description() -> None:
-    video = make_video(description="今天聊 AVGO 的融资\n\n免责声明:...\nhttps://example.com")
-    prompt = parse_vocabulary("").prompt(video, seed=None)
-    assert prompt == "美股 半导体 AVGO 今天聊 AVGO 的融资"
+def test_hashtags_are_unicode_deduplicated_and_exclude_url_fragments() -> None:
+    video = make_video(
+        title="Title #AVGO",
+        description="Prose\n#\u534a\u5bfc\u4f53 #AVGO #TSM, #AI_2026! "
+        "https://example.com/#fragment plain#word",
+    )
+    assert video.hashtags == ["#AVGO", "#\u534a\u5bfc\u4f53", "#TSM", "#AI_2026"]
+    assert parse_vocabulary("").prompt(video) == " ".join(video.hashtags)
 
 
-def test_prompt_stays_inside_the_budget_and_prefers_terms_from_the_title() -> None:
-    vocabulary = parse_vocabulary("\n".join([f"填充词{i:02d}" for i in range(40)] + ["AVGO"]))
-    prompt = vocabulary.prompt(make_video(), seed="以下是普通话的句子。", max_chars=60)
+@pytest.mark.parametrize("description", [None, "", "Ordinary description without tags"])
+def test_missing_hashtags_do_not_fall_back_to_title_or_description(description) -> None:
+    video = make_video(description=description)
+    assert video.hashtags == []
+    assert parse_vocabulary("").prompt(video) is None
+
+
+def test_prompt_stays_inside_budget_and_prefers_terms_from_hashtags() -> None:
+    vocabulary = parse_vocabulary("\n".join([f"filler{i:02d}" for i in range(40)] + ["AVGO"]))
+    prompt = vocabulary.prompt(make_video(description="#AVGO"), seed="Seed.", max_chars=60)
     assert prompt is not None
     assert len(prompt) <= 60
-    # AVGO is in the title, so it survives the budget the filler words do not.
-    assert "AVGO" in prompt.split("。")[-2]
+    # The matching vocabulary term is retained as well as the hashtag itself.
+    assert prompt.count("AVGO") == 2
 
 
 def test_prompt_is_none_when_there_is_nothing_to_say() -> None:

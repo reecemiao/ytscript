@@ -2,7 +2,7 @@
 
 Whisper decodes a word it has been primed for far more reliably than one it has
 not, and it accepts a short prompt to be primed with. Two things go in there: the
-video's own title and description, which name the day's subject, and a glossary of
+video's own hashtags, which name the day's subject, and a glossary of
 terms the channel says every episode. Whatever still comes out wrong is rewritten
 afterwards from the same file.
 """
@@ -88,7 +88,7 @@ class Vocabulary:
     ) -> str | None:
         """Build the priming text: seed sentence, this video's subject, then terms.
 
-        Terms named in the title or description come first — they are the ones the
+        Terms named in the hashtags come first — they are the ones the
         episode actually says — and the rest fill whatever budget is left.
         """
         pieces: list[str] = []
@@ -116,18 +116,8 @@ class Vocabulary:
 
 
 def _subject(video: Video | None) -> str:
-    """The video's own words about itself: title first, then a slice of the blurb."""
-    if video is None:
-        return ""
-    parts = [video.title.strip()] if video.title else []
-    description = (video.description or "").strip()
-    if description:
-        # Descriptions run to link dumps and boilerplate; the opening line is the
-        # part that says what the episode is about.
-        first = description.splitlines()[0].strip()
-        if first:
-            parts.append(first)
-    return " ".join(parts)
+    """Use only explicit hashtags as the video's metadata prompt."""
+    return " ".join(video.hashtags) if video is not None else ""
 
 
 def parse_vocabulary(text: str, source: str = "") -> Vocabulary:

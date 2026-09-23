@@ -88,7 +88,7 @@ class Config:
     turns it off regardless, so leaving it off also keeps the two paths in step."""
 
     prompt_from_metadata: bool = True
-    """Prime each video with its own title and description, so the day's tickers and
+    """Prime each video with its own hashtags, so the day's tickers and
     names are words the model is already expecting."""
 
     vocabulary: str | None = None
@@ -380,7 +380,7 @@ whisper_compute_type = "float16"
 # get the stock sentence for `language`, or set it to "" for no seed at all.
 whisper_initial_prompt = "以下是普通话的句子。"
 
-# The seed is followed by the video's own title and description, so the tickers
+# The seed is followed by the video's own hashtags, so the tickers
 # and names that episode is about are words the model already expects.
 prompt_from_metadata = true
 

@@ -23,7 +23,7 @@ class Transcriber(Protocol):
     ) -> tuple[list[Segment], str | None]:
         """Return the segments and the language that was used or detected.
 
-        ``prompt`` primes the model with words to expect — the video's title and
+        ``prompt`` primes the model with words to expect — the video's hashtags and
         the channel's vocabulary — and overrides whatever the backend was built with.
         """
         ...

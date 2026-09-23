@@ -46,6 +46,14 @@ class Video:
     members_only: bool = False
     """Behind the channel's membership; only downloadable with a member's cookies."""
 
+    @property
+    def hashtags(self) -> list[str]:
+        """Distinct hashtags from the title and description, in their original order."""
+        text = self.title + "\n" + (self.description or "")
+        # URL fragments are links, not video hashtags.
+        text = re.sub(r"https?://\S+", "", text)
+        return list(dict.fromkeys(re.findall(r"(?<![\w#])#\w+", text)))
+
 
 @dataclass(frozen=True)
 class Segment:

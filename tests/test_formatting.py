@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import date
 from pathlib import Path
 
@@ -116,3 +117,25 @@ def test_mixed_chinese_and_latin_keeps_the_seam_readable() -> None:
 def test_transcript_text_joins_chinese_without_spaces() -> None:
     transcript = Transcript(video=VIDEO, segments=CHINESE, language="zh", backend="fake")
     assert transcript.text == "今天我们来聊聊这个话题。先从背景开始。第一步。"
+
+
+def test_all_outputs_include_hashtags_without_description() -> None:
+    video = replace(VIDEO, description="Do not publish this prose.\n#rice #cooking #rice")
+    transcript = replace(TRANSCRIPT, video=video)
+    for render in (render_txt, render_md, render_json):
+        output = render(transcript)
+        assert "#rice" in output and "#cooking" in output
+        assert "Do not publish this prose." not in output
+        assert "Welcome back." in output
+    payload = json.loads(render_json(transcript))
+    assert payload["video"]["hashtags"] == ["#rice", "#cooking"]
+    assert "description" not in payload["video"]
+
+
+def test_outputs_without_hashtags_omit_empty_sections_and_description() -> None:
+    transcript = replace(TRANSCRIPT, video=replace(VIDEO, description="Private prose."))
+    for render in (render_txt, render_md):
+        output = render(transcript)
+        assert "Hashtags" not in output
+        assert "Private prose." not in output
+    assert json.loads(render_json(transcript))["video"]["hashtags"] == []
